@@ -14,6 +14,15 @@ shared-memory
 api/index
 ```
 
+```{toctree}
+:hidden:
+:caption: Design notes
+
+design/live-topics
+design/node-measures
+design/opensovd-adapter
+```
+
 zenode is a typed node framework for distributed robot systems on
 [Eclipse Zenoh](https://zenoh.io). Independent processes ("nodes") are coupled
 only through a **typed topic contract**; the runtime handles session bootstrap,
@@ -138,3 +147,15 @@ repository contains complete programs, each runnable as-is:
 
 Read [Contracts](contracts.md) first — it is the part two processes must agree
 on. [Nodes](nodes.md) covers everything a single process does.
+
+## Design notes
+
+Proposals, not features. Each records a design that has not been built, with
+the trade-offs and the alternatives that were rejected, so the decision can be
+taken deliberately or dropped on purpose.
+
+| Note | Question it answers |
+|---|---|
+| [Live topic discovery](design/live-topics.md) | How to see what is actually on the bus right now, and how it differs from the contract |
+| [Node-defined measurements](design/node-measures.md) | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
+| [OpenSOVD adapter](design/opensovd-adapter.md) | Whether zenode should speak [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics, and what that would cost |
