@@ -61,6 +61,14 @@ class TransportConfig(NodeConfig):
     connect: list[str] = Field(default_factory=list)
     listen: list[str] = Field(default_factory=list)
     namespace: str = ""
+    host: str = ""
+    """The machine this node runs on, reported on ``NodeHealth.host``.
+
+    A deployment label, not an identity — nothing is addressed by it, and no
+    key contains it. Empty means ``socket.gethostname()``, which is the right
+    answer on a robot and the wrong one in a container, where the hostname is a
+    random hex id and the useful name is ``jetson-perception``. Same stance
+    ``namespace`` takes: the deployment supplies it."""
     multicast_scouting: bool = True
     shared_memory: bool = False
     """Enable zenoh's shared-memory transport. Needed at **both** ends before a

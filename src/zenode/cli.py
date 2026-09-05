@@ -38,14 +38,22 @@ from . import __version__
 from .config import TransportConfig, find_config_file, load_transport_config
 from .envelope import decode_envelope
 from .errors import ConfigError
-from .exporter import DEFAULT_STALE_AFTER, Registry, make_server
+from .exporter import DEFAULT_STALE_AFTER, Registry, format_value, make_server
 from .msgs.health import NodeHealth, health_pattern
+from .msgs.info import NodeInfo, info_pattern
 from .msgs.log import LogRecordMsg, log_key, log_pattern
 from .msgs.trace import Hop, TraceHops, TraceQuery, trace_pattern
 from .otlp_logs import TIMEOUT, OtlpLogShipper
 from .otlp_metrics import OtlpMetricShipper
 from .presence import list_nodes, node_name_from_key, presence_pattern
-from .topic import Topic, find_topic, registered_services, registered_topics, resolve_key
+from .topic import (
+    Topic,
+    find_topic,
+    registered_services,
+    registered_topics,
+    resolve_key,
+    topic_flags,
+)
 
 
 def _load_contracts(modules: list[str]) -> None:
@@ -72,6 +80,25 @@ def _transport_from_args(args: argparse.Namespace) -> TransportConfig:
 
 def _open_session(transport: TransportConfig) -> zenoh.Session:
     return zenoh.open(transport.to_zenoh_config())
+
+
+def _declare_latched_subscriber(
+    session: zenoh.Session, key: str, callback: Any, *, max_samples: int = 1
+) -> Any:
+    """Subscribe *and* ask for the history a latched publisher cached.
+
+    A plain subscriber receives no zenoh-ext cache, so a CLI or sidecar started
+    after the nodes would never see a value published once at startup — which
+    is every node descriptor and most state topics.
+    """
+    import zenoh.ext as zext
+
+    return zext.declare_advanced_subscriber(
+        session,
+        key,
+        callback,
+        history=zext.HistoryConfig(detect_late_publishers=True, max_samples=max_samples),
+    )
 
 
 def _resolve_cli_key(key: str, namespace: str, absolute: bool) -> str:
@@ -113,26 +140,9 @@ def cmd_topics(args: argparse.Namespace) -> int:
     if topics:
         print(f"{'KEY':<44} {'SCHEMA':<24} {'FLAGS':<42} OWNER")
         for entry, topic in topics:
-            flags = []
-            if topic.latched:
-                flags.append(f"latched({topic.history})")
-            if topic.max_age is not None:
-                flags.append(f"max_age={topic.max_age}")
-            if topic.trace:
-                # Where traces begin is the first thing you want from a
-                # contract listing when a pipeline spans five processes.
-                flags.append("trace" if topic.trace_ratio >= 1.0 else f"trace@{topic.trace_ratio}")
-            if topic.shm:
-                flags.append("shm")
-            # Only when they differ from the default: QoS is a per-topic
-            # exception, and a listing that repeats "prio=data" on every row
-            # buries the one topic that actually claims precedence.
-            if topic.priority != "data":
-                flags.append(f"prio={topic.priority}")
-            if topic.congestion_control != "drop":
-                flags.append(topic.congestion_control)
-            if topic.express:
-                flags.append("express")
+            # Shared with the NodeInfo descriptor, so a listing of the contract
+            # and a listing of the bus cannot disagree about what a topic does.
+            flags = topic_flags(topic)
             print(
                 f"{topic.resolve(namespace):<44} {topic.schema.__name__:<24} "
                 f"{','.join(flags) or '-':<42} {entry.owner}.{entry.attr}"
@@ -159,14 +169,7 @@ def cmd_echo(args: argparse.Namespace) -> int:
     samples: queue.Queue[zenoh.Sample] = queue.Queue()
     session = _open_session(transport)
     if topic is not None and topic.latched:
-        import zenoh.ext as zext
-
-        sub: Any = zext.declare_advanced_subscriber(
-            session,
-            key,
-            samples.put,
-            history=zext.HistoryConfig(detect_late_publishers=True, max_samples=topic.history),
-        )
+        sub: Any = _declare_latched_subscriber(session, key, samples.put, max_samples=topic.history)
     else:
         sub = session.declare_subscriber(key, samples.put)
     print(f"listening on {key!r}" + (f" (typed: {topic.schema.__name__})" if topic else " (raw)"))
@@ -242,7 +245,7 @@ def _format_uptime(seconds: float) -> str:
 
 
 _HEALTH_HEADER = (
-    f"{'NODE':<16} {'STATE':<8} {'UP':>6} {'SEEN':>5} {'CPU%':>6} {'RSS':>7} "
+    f"{'NODE':<16} {'HOST':<14} {'STATE':<8} {'UP':>6} {'SEEN':>5} {'CPU%':>6} {'RSS':>7} "
     f"{'SENT':>6} {'RECV':>6} {'QMAX':>5} {'DROP':>5} {'STALE':>5} {'ERR':>4} {'OVER':>4} "
     f"{'MISS':>5} {'MSG AGE ms':>13} {'HANDLER ms':>13}"
 )
@@ -264,7 +267,8 @@ def _health_row(health: NodeHealth, seen_s: float) -> str:
     handler = f"{health.handler_mean_ms:.1f}/{health.handler_max_ms:.1f}"
     cpu = "-" if health.cpu_percent is None else f"{health.cpu_percent:.1f}"
     return (
-        f"{health.node:<16} {health.state:<8} {_format_uptime(health.uptime_s):>6} "
+        f"{health.node:<16} {health.host:<14} {health.state:<8} "
+        f"{_format_uptime(health.uptime_s):>6} "
         f"{seen_s:>4.1f}s {cpu:>6} {_format_bytes(health.rss_bytes):>7} "
         f"{health.sent:>6} {health.received:>6} {health.queue_max_depth:>5} "
         f"{health.dropped:>5} {health.stale:>5} {health.handler_errors:>4} "
@@ -285,7 +289,50 @@ def _drain_health(inbox: queue.Queue[bytes], latest: dict[str, tuple[NodeHealth,
         latest[health.node] = (health, time.monotonic())
 
 
-def _render_health(latest: dict[str, tuple[NodeHealth, float]], *, clear: bool) -> None:
+def _drain_info(inbox: queue.Queue[bytes], catalogs: dict[str, NodeInfo]) -> None:
+    while True:
+        try:
+            payload = inbox.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            info = NodeInfo.model_validate_json(payload)
+        except ValidationError:
+            continue  # someone else's message on a matching key
+        catalogs[info.node] = info
+
+
+def _measure_rows(
+    latest: dict[str, tuple[NodeHealth, float]], catalogs: dict[str, NodeInfo]
+) -> list[str]:
+    """One block per node that reports measurements; nothing for the rest.
+
+    Not columns: measurements are per-node by construction, so a table of them
+    would be mostly empty cells. A fleet that declares none prints nothing extra.
+    """
+    lines: list[str] = []
+    for name in sorted(latest):
+        health = latest[name][0]
+        if not health.measures:
+            continue
+        info = catalogs.get(name)
+        units = {d.id: d.unit for d in info.measures} if info else {}
+        lines.append(f"{name}:")
+        for measure_id, value in sorted(health.measures.items()):
+            unit = units.get(measure_id, "")
+            # The exporter's rule, not a second weaker one: `%g` would render a
+            # counter past a million as 1.20457e+06, and a counter you cannot
+            # read exactly is not much of a counter.
+            lines.append(f"  {measure_id} = {format_value(value)}" + (f" [{unit}]" if unit else ""))
+    return lines
+
+
+def _render_health(
+    latest: dict[str, tuple[NodeHealth, float]],
+    *,
+    clear: bool,
+    catalogs: dict[str, NodeInfo] | None = None,
+) -> None:
     if clear and sys.stdout.isatty():
         print("\033[H\033[2J", end="")
     if not latest:
@@ -296,6 +343,10 @@ def _render_health(latest: dict[str, tuple[NodeHealth, float]], *, clear: bool) 
     for name in sorted(latest):
         health, at = latest[name]
         print(_health_row(health, now - at))
+    rows = _measure_rows(latest, catalogs or {})
+    if rows:
+        print()
+        print("\n".join(rows))
     # Not a column: normally zero, and a permanent column of zeros teaches you
     # to stop reading it. When it is not zero, `zenode logs` is lying by omission.
     starved = {name: h.logs_dropped for name, (h, _) in latest.items() if h.logs_dropped}
@@ -308,15 +359,23 @@ def cmd_health(args: argparse.Namespace) -> int:
     transport = _transport_from_args(args)
     pattern = health_pattern(transport.namespace)
     inbox: queue.Queue[bytes] = queue.Queue()
+    info_inbox: queue.Queue[bytes] = queue.Queue()
     session = _open_session(transport)
     sub = session.declare_subscriber(pattern, lambda s: inbox.put(s.payload.to_bytes()))
+    # Latched and published once per node, so this has to ask for the history
+    # or a CLI started after the nodes learns no units at all.
+    info_sub = _declare_latched_subscriber(
+        session, info_pattern(transport.namespace), lambda s: info_inbox.put(s.payload.to_bytes())
+    )
     latest: dict[str, tuple[NodeHealth, float]] = {}
+    catalogs: dict[str, NodeInfo] = {}
     try:
         if args.watch:
             print(f"watching {pattern!r} (Ctrl-C to stop)…")
             while True:
                 _drain_health(inbox, latest)
-                _render_health(latest, clear=True)
+                _drain_info(info_inbox, catalogs)
+                _render_health(latest, clear=True, catalogs=catalogs)
                 time.sleep(1.0)
         # One shot: heartbeats are periodic, so wait long enough to hear one.
         deadline = time.monotonic() + args.wait
@@ -324,11 +383,13 @@ def cmd_health(args: argparse.Namespace) -> int:
             _drain_health(inbox, latest)
             time.sleep(0.1)
         _drain_health(inbox, latest)
-        _render_health(latest, clear=False)
+        _drain_info(info_inbox, catalogs)
+        _render_health(latest, clear=False, catalogs=catalogs)
         return 0 if latest else 1
     except KeyboardInterrupt:
         return 0
     finally:
+        info_sub.undeclare()
         sub.undeclare()
         session.close()
 
@@ -410,7 +471,15 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     session = _open_session(transport)
     subscriptions = [
-        session.declare_subscriber(health, lambda s: registry.offer(s.payload.to_bytes()))
+        session.declare_subscriber(health, lambda s: registry.offer(s.payload.to_bytes())),
+        # The descriptors carry the TYPE, HELP and unit of every application
+        # measurement. Latched, so this has to ask for the history — a sidecar
+        # started after the nodes would otherwise export none of them.
+        _declare_latched_subscriber(
+            session,
+            info_pattern(transport.namespace),
+            lambda s: registry.offer_info(s.payload.to_bytes()),
+        ),
     ]
     server = make_server(registry, host, port)
     print(f"scraping {health!r} → http://{host}:{port}/metrics")

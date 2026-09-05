@@ -19,6 +19,7 @@ optional and require an OpenTelemetry SDK supplied by the application.
 | Trace id on log records | every record | automatic when a trace is active |
 | Log records | `<ns>/node/<name>/log` | `publish_logs_at` (`"WARNING"`) |
 | Health heartbeat | `<ns>/node/<name>/health` | `health_interval` (`2.0`) |
+| Node descriptor | `<ns>/node/<name>/info` | `health_interval` (latched, published once) |
 | Hop records | `<ns>/node/<name>/trace` | `trace_ring` (`4096`) |
 | Trace context | zenoh attachment | `Topic(trace=…, trace_ratio=…)` |
 
@@ -169,11 +170,20 @@ Discards are reported as `NodeHealth.logs_dropped` and flagged by
 
 | Group      | Fields                                                                  |
 |------------|-------------------------------------------------------------------------|
+| Identity   | `node`, `host`, `state`                                                 |
 | Traffic    | `sent`, `received`                                                      |
 | Errors     | `handler_errors`                                                        |
 | Saturation | `dropped`, `stale`, `timer_overruns`, `queue_max_depth`, `logs_dropped`, `shm_fallbacks` |
 | Latency    | `age_mean_ms`, `age_max_ms`, `handler_mean_ms`, `handler_max_ms`        |
 | Resources  | `cpu_percent`, `rss_bytes`                                              |
+| Application| `measures` — see *Application metrics* below                            |
+
+`host` is the machine the node runs on, defaulting to `socket.gethostname()`
+and overridable with `[transport] host` (or `ZENODE_TRANSPORT__HOST`). It is a
+deployment label, not an identity: nothing is addressed by it and no key
+contains it. Set it where the hostname is a container's random hex id. It
+appears as a label on every `zenode_node_*` series and as the `host.name`
+resource attribute on the OTLP path.
 
 `age_*` measures publish-to-dequeue delay and depends on synchronised clocks
 between machines. Counters are cumulative since node start; latencies and
@@ -183,44 +193,84 @@ between machines. Counters are cumulative since node start; latencies and
 
 ### Application metrics
 
-`NodeHealth` is a fixed set of runtime signals and is not extensible: unknown
-fields are discarded during validation, and both export paths iterate a fixed
-table. Application measurements — battery voltage, temperature, disk headroom —
-are recorded through the OpenTelemetry metrics API instead, which reaches the
-same backend without involving zenode.
-
-Register a `MeterProvider` alongside the tracer provider, using the same
-`service.name` so that metrics, spans and logs group under one service:
-
-```python
-from opentelemetry import metrics
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-
-reader = PeriodicExportingMetricReader(
-    OTLPMetricExporter(endpoint=f"{OTLP_ENDPOINT}/v1/metrics")
-)
-metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
-```
-
-Then instrument as usual — `create_counter`, `create_gauge`,
-`create_up_down_counter` and `create_histogram` are all available:
+A node puts its own numbers on the heartbeat by declaring them with `@metric`:
 
 ```python
 class Nav(Node):
-    async def on_start(self) -> None:
-        meter = metrics.get_meter("nav")
-        self.battery = meter.create_gauge("robot.battery.volts")
+    name = "nav"
 
-    @every(1.0)
-    async def sample(self) -> None:
-        self.battery.set(self.sensors.voltage())
+    @metric("battery_soc", unit="1", description="Pack state of charge.")
+    def _soc(self) -> float | None:
+        return self._driver.soc          # None is unknown, and unknown is not zero
+
+    @metric("frames_processed", unit="{frame}", kind="counter", integral=True)
+    def _frames(self) -> int:
+        return self._count
 ```
 
-zenode is not in this path: it neither aggregates nor forwards these, and
-`zenode export` is not involved. Requires `opentelemetry-sdk` and a metric
-exporter in addition to `zenode[otel]`.
+| Argument      | Effect                                                              |
+|---------------|---------------------------------------------------------------------|
+| `id`          | `[a-z][a-z0-9_]*`. Exported as `zenode_app_<id>`.                   |
+| `unit`        | UCUM: `s`, `By`, `1`, `{frame}`. [Conventions](conventions.md) apply. |
+| `kind`        | `"gauge"` (default) or `"counter"` — cumulative since node start.    |
+| `integral`    | The value is a whole number; OTLP encodes it as `asInt`.             |
+| `description` | One line, used as the exported `HELP`.                               |
+
+Values ride on `NodeHealth.measures`; unit, kind and description go once on the
+latched `<ns>/node/<name>/info` descriptor, which is where `zenode health` and
+`zenode export` read them from. A sidecar started an hour later still receives
+it, from zenoh's own cache rather than from the node's event loop — so a wedged
+node's catalog is still available when it is most wanted.
+
+Evaluation happens on the health timer, so the rules of any timer body apply:
+
+- **It must not block.** Read a value the node already cached; anything that
+  would go and fetch one belongs in `Node.blocking`.
+- Returning `None`, or a non-finite number, omits that value for this
+  heartbeat. Absent means *unknown*, not zero.
+- Raising is logged, counted in `handler_errors`, and omits that one value.
+  The heartbeat itself is never taken down with it.
+- The set of ids is fixed once the class body has executed. That declaration is
+  the bound on exported cardinality — there is no runtime cap because none is
+  needed.
+
+Both export paths carry them, under a prefix that keeps application-owned names
+clear of the runtime's own:
+
+```
+zenode_app_battery_soc{host="jetson",namespace="robodog",node="nav"} 0.87
+zenode_app_frames_processed_total{host="jetson",namespace="robodog",node="nav"} 1204
+```
+
+An id means the same thing fleet-wide. Where two nodes declare one with a
+different `kind`, only one can be exported — a Prometheus name carries a single
+type — so the first node in sorted order wins, the others' points are omitted,
+and the exporter logs it once. A value whose node has published no descriptor
+yet is omitted rather than guessed at; latched delivery makes that gap
+transient, and a series whose `TYPE` flips mid-history is worse than a hole.
+
+**The fence: scalars that describe a node's health go on the heartbeat;
+application state goes behind a read-only service.** A `BatteryState`, a pose,
+a costmap — those are not measurements. Expose them from a `Service`, where
+they are computed on request and can be any shape. Without that line the
+heartbeat grows without bound and pub/sub has been reinvented inside a 0.5 Hz
+message.
+
+The division of labour, when both would work:
+
+|                        | Heartbeat measurement    | Read-only service        |
+|------------------------|--------------------------|--------------------------|
+| Reaches                | the bus, unprompted      | the event loop, on request |
+| Survives a wedged node | the last value does      | no                       |
+| Freshness              | up to `health_interval` old | computed now          |
+| Shape                  | one scalar               | any model                |
+
+Histograms, string-valued readings and per-object cardinality are all out of
+scope here. Where they are genuinely needed, the OpenTelemetry metrics SDK sits
+alongside zenode and reaches the same backend — register a `MeterProvider` with
+the same `service.name` as the tracer provider. That requires
+`opentelemetry-sdk` and a metric exporter; zenode is not in that path and
+`zenode export` is not involved.
 
 ## Exporting
 
@@ -325,7 +375,7 @@ declined in favour of `/proc` reads, and protobuf in favour of OTLP/JSON.
 | `metrics.py`                      | `Latency`, `ProcessStats`                                  |
 | `exporter.py`                     | Prometheus exposition, shared `Metric` table, `Registry`   |
 | `otlp_logs.py`, `otlp_metrics.py` | OTLP/JSON push                                             |
-| `msgs/{health,log,trace}.py`      | Wire contracts and key helpers                             |
+| `msgs/{health,info,log,trace}.py` | Wire contracts and key helpers                             |
 
 Instrumentation is confined to four call sites: `Publisher.put`,
 `Subscription._dispatch`, `ServiceServer._handle` and `Node._publish_health`.
@@ -347,7 +397,11 @@ Instrumentation is confined to four call sites: `Publisher.put`,
 
 `exporter.Metric` holds the Prometheus name, the OTLP name, a UCUM unit and the
 accessor. Both export paths iterate the same table;
-`test_both_paths_export_the_same_fields` enforces this.
+`test_both_paths_export_the_same_fields` enforces this. Application `@metric`
+measurements keep the same invariant by a different route: the nodes' own
+`NodeInfo` descriptors *are* the table, read by `exporter.render` and
+`otlp_metrics.encode` alike, so neither path can carry a type or a unit the
+other does not.
 
 Units are chosen so that a collector's OTLP-to-Prometheus normalisation yields
 the names produced by the text exposition — `zenode.node.sent` with unit

@@ -1,8 +1,24 @@
 # Node-defined measurements
 
-**Status: proposal. Not implemented — nothing on this page exists in 0.1.x.**
-It records a design and its trade-offs so the decision can be taken, or
-declined, deliberately. Drafted 2026-08-26.
+**Status: implemented.** Drafted 2026-08-26, landed the same month. The page is
+kept for the trade-offs and the rejected alternatives, which the code no longer
+states; [Nodes](../nodes.md#measurements) and
+[Observability](../open-telemetry.md#application-metrics) document what shipped.
+
+Four things differ from the draft below, each decided when it was built:
+
+- **The decorator is `@metric`**, not `@measure` — one decorator with
+  `kind="gauge"|"counter"`, aligned with Prometheus and OTel vocabulary. §4
+  left the name open.
+- **The catalog is a field on a broader descriptor**, not a
+  `node/<name>/measures` topic of its own. §4's last open question and
+  [live-topics](live-topics.md) §6 both argued for it, so the wire is not
+  revised twice: `zenode/msgs/info.py` carries `NodeInfo`, and `measures` is one
+  of its fields.
+- **`MeasureDescriptor` has no `name`.** The `id` *is* the name; two identifiers
+  for one thing is the drift a single table exists to prevent.
+- **`host` is overridden from `[transport] host`**, beside `namespace` — the
+  other deployment label a node already reads off `TransportConfig`.
 
 `NodeHealth` is a closed set. Every field on it is computed by the runtime in
 `Node._publish_health`, and an application has no way to put a number of its

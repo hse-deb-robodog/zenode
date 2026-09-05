@@ -1,8 +1,19 @@
 # Live topic discovery
 
-**Status: proposal. Not implemented — nothing on this page exists in 0.1.x.**
-It records a design and its trade-offs so the decision can be taken, or
-declined, deliberately. Drafted 2026-08-26.
+**Status: partly implemented.** Drafted 2026-08-26. The runtime half of §3 —
+`zenode/msgs/info.py`, the latched descriptor, the change counter on
+`publisher()`/`subscribe()`/`serve()`, the republish from the health tick — is
+built and shipped, because [node measurements](node-measures.md) needed the
+catalog it carries. `zenode topics --live` and the contract/bus diff (§4) are
+**not** built, and remain a proposal.
+
+Two details differ from §3: the field is `EntityInfo.schema_name`, because
+pydantic v2 warns that `schema` shadows a `BaseModel` attribute, and `NodeInfo`
+carries `host` as well. The reserved-key filtering in §3 belongs to the CLI side
+and is therefore not built either — every node's descriptor currently lists its
+own health, log, info and trace entities.
+
+The rest of the page is kept for the trade-offs and the rejected alternatives.
 
 `zenode topics` lists the *contract*: it imports a module, reads
 `topic._REGISTRY`, and prints what was declared. That is a static view of a

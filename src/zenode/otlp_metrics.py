@@ -8,7 +8,9 @@ your sidecar.
 
 Both paths read the same :class:`~zenode.exporter.Registry` and the same metric
 table, so a scrape and a push a moment apart report identical numbers, and no
-field can be exported by one and quietly missed by the other.
+field can be exported by one and quietly missed by the other. Application
+``@metric`` measurements work the same way: the nodes' own descriptors *are*
+the table, read here and by :func:`zenode.exporter.render` alike.
 
 Hand-rolled OTLP/JSON, so this needs **no dependency** — the same reasoning as
 :mod:`zenode.otlp_logs`. A transport, not an SDK.
@@ -24,10 +26,16 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .exporter import COUNTERS, GAUGES, Metric, Registry, Sample
+from .exporter import COUNTERS, GAUGES, Registry, Sample, app_descriptors
+from .msgs.info import NodeInfo
 from .otlp_logs import TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+APP_PREFIX = "zenode.app."
+"""Dotted counterpart of :data:`zenode.exporter.APP_PREFIX`. A collector
+normalises ``zenode.app.battery_soc`` back to ``zenode_app_battery_soc``, so
+both export paths land on one series."""
 
 DEFAULT_INTERVAL = 15.0
 """Matches Prometheus's usual scrape interval: these are heartbeat-derived
@@ -43,13 +51,14 @@ def _attribute(key: str, value: str) -> dict[str, Any]:
 
 
 def _point(
-    metric: Metric,
     value: float,
     start_ns: int,
     now_ns: int,
     *,
     node: str,
     namespace: str,
+    integral: bool,
+    counter: bool,
 ) -> dict[str, Any]:
     # `node` and `namespace` repeat what the resource already says, because a
     # collector turns resource attributes into `service_name`/`job` while the
@@ -61,13 +70,29 @@ def _point(
     }
     # OTLP/JSON carries int64 as a string and double as a number; sending a
     # float where the backend expects an integer silently changes the type.
-    if metric.integral:
+    if integral:
         point["asInt"] = str(int(value))
     else:
         point["asDouble"] = float(value)
-    if metric.kind == "counter":
+    if counter:
         point["startTimeUnixNano"] = str(start_ns)
     return point
+
+
+def _body(
+    name: str, unit: str, description: str, point: dict[str, Any], *, counter: bool
+) -> dict[str, Any]:
+    """One metric, wrapped in the aggregation OTLP expects for its kind."""
+    body: dict[str, Any] = {"name": name, "unit": unit, "description": description}
+    if counter:
+        body["sum"] = {
+            "dataPoints": [point],
+            "aggregationTemporality": _CUMULATIVE,
+            "isMonotonic": True,
+        }
+    else:
+        body["gauge"] = {"dataPoints": [point]}
+    return body
 
 
 def _start_ns(sample: Sample) -> int:
@@ -80,13 +105,30 @@ def _start_ns(sample: Sample) -> int:
     return int(sample.health.ts_ns - sample.health.uptime_s * 1_000_000_000)
 
 
-def encode(samples: dict[str, Sample], namespace: str, *, now_ns: int) -> dict[str, Any]:
-    """One OTLP ``resourceMetrics`` payload, one resource per node."""
+def encode(
+    samples: dict[str, Sample],
+    namespace: str,
+    *,
+    now_ns: int,
+    catalogs: dict[str, NodeInfo] | None = None,
+) -> dict[str, Any]:
+    """One OTLP ``resourceMetrics`` payload, one resource per node.
+
+    ``catalogs`` supplies the kind and unit of each node's ``@metric``
+    measurements; a node without one contributes no ``zenode.app.*`` metric,
+    for the same reason the scrape path omits it — an unknown type is worse
+    than a hole.
+    """
+    catalogs = catalogs or {}
+    chosen = app_descriptors(catalogs)
     resources = []
     for node, sample in sorted(samples.items()):
         attributes = [_attribute("service.name", node)]
         if namespace:
             attributes.append(_attribute("service.namespace", namespace))
+        if sample.health.host:
+            # The OpenTelemetry semantic convention, beside service.name.
+            attributes.append(_attribute("host.name", sample.health.host))
         start_ns = _start_ns(sample)
 
         metrics: list[dict[str, Any]] = []
@@ -94,21 +136,50 @@ def encode(samples: dict[str, Sample], namespace: str, *, now_ns: int) -> dict[s
             value = metric.value(sample.health)
             if value is None:
                 continue  # unknown is not zero — see Metric.value
-            point = _point(metric, value, start_ns, now_ns, node=node, namespace=namespace)
-            body: dict[str, Any] = {
-                "name": metric.otlp,
-                "unit": metric.unit,
-                "description": metric.help,
-            }
-            if metric.kind == "counter":
-                body["sum"] = {
-                    "dataPoints": [point],
-                    "aggregationTemporality": _CUMULATIVE,
-                    "isMonotonic": True,
-                }
-            else:
-                body["gauge"] = {"dataPoints": [point]}
-            metrics.append(body)
+            point = _point(
+                value,
+                start_ns,
+                now_ns,
+                node=node,
+                namespace=namespace,
+                integral=metric.integral,
+                counter=metric.kind == "counter",
+            )
+            metrics.append(
+                _body(
+                    metric.otlp,
+                    metric.unit,
+                    metric.help,
+                    point,
+                    counter=metric.kind == "counter",
+                )
+            )
+
+        # Application counters share the node's start instant, so `_start_ns`
+        # already derives the right origin and a restart reads as a reset.
+        for descriptor in catalogs.get(node, NodeInfo(node=node)).measures:
+            value = sample.health.measures.get(descriptor.id)
+            if value is None or chosen[descriptor.id].kind != descriptor.kind:
+                continue
+            counter = descriptor.kind == "counter"
+            point = _point(
+                value,
+                start_ns,
+                now_ns,
+                node=node,
+                namespace=namespace,
+                integral=descriptor.integral,
+                counter=counter,
+            )
+            metrics.append(
+                _body(
+                    f"{APP_PREFIX}{descriptor.id}",
+                    descriptor.unit,
+                    descriptor.description,
+                    point,
+                    counter=counter,
+                )
+            )
 
         if metrics:
             resources.append(
@@ -138,10 +209,10 @@ class OtlpMetricShipper:
 
     def flush(self, now_ns: int) -> int:
         """Push the current snapshot. Returns the number of nodes reported."""
-        samples = self.registry.snapshot()
+        samples, catalogs = self.registry.snapshot()
         if not samples:
             return 0
-        payload = encode(samples, self.registry.namespace, now_ns=now_ns)
+        payload = encode(samples, self.registry.namespace, now_ns=now_ns, catalogs=catalogs)
         if not payload["resourceMetrics"]:
             return 0
         request = urllib.request.Request(

@@ -198,7 +198,9 @@ async def test_shutdown_is_idempotent():
 
 
 def test_health_publish_without_a_heartbeat_is_a_noop():
-    Quiet()._publish_health()  # health_interval is None: no publisher exists
+    # health_interval is None: start() never attaches the reporter, so a beat
+    # (or a descriptor request) has nowhere to publish and must not raise.
+    internals(Quiet()).reporter.beat()
 
 
 # ----------------------------------------------------------------- start/stop

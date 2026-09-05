@@ -267,9 +267,20 @@ def test_topics_shows_qos_only_when_it_differs_from_the_default(cli_args, capsys
 
 @pytest.fixture
 def mock_session(monkeypatch):
-    """Replace ``_open_session`` so command tests never touch the network."""
+    """Replace ``_open_session`` so command tests never touch the network.
+
+    ``_declare_latched_subscriber`` is stubbed alongside it because zenoh-ext
+    refuses a ``MagicMock`` where it wants a real ``Session``. It routes to a
+    *separate* mock rather than to ``declare_subscriber``, so a test can still
+    assert on exactly one of the two kinds of subscription.
+    """
     session = MagicMock(name="session")
+    session.declare_latched_subscriber = MagicMock(name="latched_subscriber")
     monkeypatch.setattr("zenode.cli._open_session", MagicMock(return_value=session))
+    monkeypatch.setattr(
+        "zenode.cli._declare_latched_subscriber",
+        lambda s, key, callback, **kwargs: s.declare_latched_subscriber(key, callback),
+    )
     return session
 
 
@@ -429,9 +440,18 @@ def test_health_subscribes_to_the_namespaced_pattern(cli_args, mock_session):
 
 
 @pytest.mark.usefixtures("no_ambient_config")
+def test_health_asks_the_latched_cache_for_the_descriptors(cli_args, mock_session):
+    """Published once per node, so a plain subscriber would learn no units."""
+    cmd_health(cli_args(namespace="robodog", watch=False, wait=0.0))
+    key = mock_session.declare_latched_subscriber.call_args.args[0]
+    assert key == "robodog/node/*/info"
+
+
+@pytest.mark.usefixtures("no_ambient_config")
 def test_health_undeclares_and_closes(cli_args, mock_session):
     cmd_health(cli_args(watch=False, wait=0.0))
     mock_session.declare_subscriber.return_value.undeclare.assert_called_once()
+    mock_session.declare_latched_subscriber.return_value.undeclare.assert_called_once()
     mock_session.close.assert_called_once()
 
 

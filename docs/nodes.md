@@ -258,6 +258,48 @@ periods — counted as `timer_overruns` — rather than bursting to catch up.
 Timer bodies run outside any trace; see
 [trace lifetime](open-telemetry.md#trace-lifetime).
 
+## Measurements
+
+Every node publishes a `NodeHealth` heartbeat every `health_interval` seconds.
+`@metric` puts one of the node's own numbers on it:
+
+```python
+class Nav(Node):
+    name = "nav"
+
+    @metric("battery_soc", unit="1", description="Pack state of charge.")
+    def _soc(self) -> float | None:
+        return self._driver.soc
+
+    @metric("frames_processed", unit="{frame}", kind="counter", integral=True)
+    def _frames(self) -> int:
+        return self._count
+```
+
+Like the wiring decorators, `@metric` only stamps metadata, so the method stays
+directly callable in a test. Ids are validated at import: a name that is not
+`[a-z][a-z0-9_]*`, one that collides with a `NodeHealth` field, or two of them
+sharing an id all raise `ContractError` where the class is defined.
+
+The rules that matter in a body:
+
+- **It must not block.** Bodies are evaluated from the health timer, so a
+  synchronous call stalls the loop along with every other timer and handler —
+  the same failure `Node.blocking` exists to avoid, and not enforceable at
+  runtime. Read a value the node already cached rather than fetching one.
+- **`None` is unknown, and unknown is not zero.** The value is left out of that
+  heartbeat rather than reported as `0.0`, the promise `cpu_percent` already
+  makes. A non-finite number is treated the same way.
+- **Raising costs one value, never the heartbeat.** The exception is logged,
+  counted in `handler_errors`, and the beat goes out without that id.
+
+Unit, kind and description travel separately, on the latched
+`<ns>/node/<name>/info` descriptor, so they are not repeated at the heartbeat
+rate. `zenode health` prints the values under its table and `zenode export`
+exports them as `zenode_app_<id>`; see
+[Observability](open-telemetry.md#application-metrics) for the export detail and
+for where the line between a measurement and a read-only service falls.
+
 ## Lifecycle
 
 ```

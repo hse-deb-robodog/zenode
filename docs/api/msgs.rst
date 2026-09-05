@@ -14,6 +14,11 @@ zenode.msgs.health
 
 .. automodule:: zenode.msgs.health
 
+zenode.msgs.info
+----------------
+
+.. automodule:: zenode.msgs.info
+
 zenode.msgs.log
 ---------------
 

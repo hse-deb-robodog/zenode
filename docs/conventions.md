@@ -44,6 +44,11 @@ document, not in field names.
 
 **Percent likewise.** `soc: float = 0.87`, not `87`.
 
+**This covers `@metric` measurements**, which travel on a zenode-owned key and
+are therefore normative here too: `@metric("battery_soc", unit="1")` reports
+0.0–1.0, an angle is radians and never named `*_deg`, and the `unit` field is
+where the rule becomes visible to whoever reads the exported series.
+
 ## 2. Coordinate frames
 
 **Right-handed, everywhere.** Positive rotation about an axis is counter-clockwise
@@ -151,6 +156,9 @@ application must not publish there:
 |---|---|
 | `<ns>/node/<name>` | liveliness token (`presence.py`) |
 | `<ns>/node/<name>/health` | `NodeHealth` heartbeat |
+| `<ns>/node/<name>/info` | `NodeInfo` descriptor, latched |
+| `<ns>/node/<name>/log` | `LogRecordMsg` records, for `zenode logs` |
+| `<ns>/node/<name>/trace` | the hop-ring service, for `zenode trace` |
 
 Everything outside `node/` belongs to the application. The suggested shape,
 which zenode does not enforce and will not:

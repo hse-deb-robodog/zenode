@@ -109,18 +109,28 @@ zenode health --watch
 ```
 
 ```
-NODE       STATE     UP  SEEN  CPU%     RSS  SENT  RECV  QMAX  DROP STALE  ERR OVER  MISS   MSG AGE ms  HANDLER ms
-camera     running   6s  1.9s   4.2   50.1M   177     0     0     0     0    0    0     0      0.0/0.0     0.0/0.0
-perception running   6s  1.9s  61.8  184.3M     2   175    12     0     0    0    3     0   10.1/116.9  10.1/151.0
+NODE       HOST     STATE     UP  SEEN  CPU%     RSS  SENT  RECV  QMAX  DROP STALE  ERR OVER  MISS   MSG AGE ms  HANDLER ms
+camera     jetson   running   6s  1.9s   4.2   50.1M   177     0     0     0     0    0    0     0      0.0/0.0     0.0/0.0
+perception jetson   running   6s  1.9s  61.8  184.3M     2   175    12     0     0    0    3     0   10.1/116.9  10.1/151.0
+
+perception:
+  battery_soc = 0.87 [1]
+  frames_processed = 1204 [{frame}]
 ```
 
 | Column | Meaning |
 |---|---|
+| `HOST` | The machine that node runs on. Blank where the deployment set none and the node predates the field. |
 | `SEEN` | Seconds since that node last reported. A number that stops rising is a node that stopped. |
 | `QMAX` | Deepest any queue got since the last heartbeat — warns before `DROP` starts. |
 | `OVER` | Timer overruns. |
 | `MISS` | Deadline misses: a subscription that went silent. |
 | `MSG AGE` / `HANDLER` | mean/max in milliseconds, over the last interval. |
+
+The block under the table is the nodes' own
+[`@metric` measurements](nodes.md#measurements), with the units from each node's
+latched descriptor. Only nodes that report measurements appear there, so a fleet
+that declares none prints nothing extra.
 
 Exits non-zero when nothing answered, so it composes into a health check.
 `--wait` sets how long to collect first; `--watch` refreshes in place.

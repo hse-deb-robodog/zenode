@@ -73,6 +73,7 @@ mode = "peer"                 # or "client"
 connect = ["tcp/host:7447"]
 listen = []
 namespace = "robodog"
+host = "jetson"               # deployment label; defaults to socket.gethostname()
 multicast_scouting = true
 shared_memory = false
 timestamping = true
@@ -84,6 +85,7 @@ timestamping = true
 | `connect` | `[]` | Endpoints to dial. |
 | `listen` | `[]` | Endpoints to accept on. |
 | `namespace` | `""` | Prefixed to every relative key. |
+| `host` | `""` | The machine a node reports running on. Empty means `socket.gethostname()`. |
 | `multicast_scouting` | `true` | Automatic discovery on a LAN. |
 | `shared_memory` | `false` | See [Shared memory](shared-memory.md). |
 | `timestamping` | `true` | HLC timestamps; required for latched topics. |

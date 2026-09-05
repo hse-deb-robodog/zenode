@@ -17,7 +17,7 @@ from typing import Any
 
 from contract import DemoServices, DemoTopics, SumReply, SumRequest
 
-from zenode import Node, every, publish, run, serve
+from zenode import Node, every, metric, publish, run, serve
 from zenode.msgs import Twist, Vector3
 
 DEMO_ENDPOINT = "tcp/127.0.0.1:17447"
@@ -32,6 +32,7 @@ class Talker(Node):
     def __init__(self, amplitude: float = 0.5, **kwargs: Any) -> None:
         super().__init__(**kwargs)  # first — wires config/transport/logging
         self.amplitude = amplitude
+        self.ticks = 0
 
     async def on_start(self) -> None:
         # publish() descriptors are already materialized here; decorated
@@ -41,7 +42,19 @@ class Talker(Node):
     @every(0.1)
     async def tick(self) -> None:
         t = time.monotonic()
+        self.ticks += 1
         self.cmd.put(Twist(linear=Vector3(x=self.amplitude * math.sin(t)), angular=Vector3(z=0.2)))
+
+    # Rides on the health heartbeat, so `zenode health` and `zenode export`
+    # report it without either of them importing this module. It must not
+    # block: it reads a value the node already has.
+    @metric("ticks", unit="{tick}", kind="counter", integral=True, description="Timer ticks.")
+    def _ticks(self) -> int:
+        return self.ticks
+
+    @metric("amplitude", unit="m/s", description="Commanded velocity amplitude.")
+    def _amplitude(self) -> float:
+        return self.amplitude
 
     @serve(DemoServices.sum)
     async def on_sum(self, req: SumRequest) -> SumReply:

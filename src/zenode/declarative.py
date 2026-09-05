@@ -16,6 +16,9 @@ its I/O where it lives::
         @every(0.1)                                   # or @every("rate_hz", unit="hz")
         async def tick(self) -> None: ...
 
+        @metric("battery_soc", unit="1")               # rides on the heartbeat
+        def _soc(self) -> float | None: ...
+
 Semantics:
 
 - The decorators only stamp metadata and return the function unchanged, so
@@ -37,11 +40,13 @@ Semantics:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Generic, Literal, TypeVar, overload
 
 from .errors import ContractError
+from .msgs.health import NodeHealth
 from .pubsub import OnDeadline, Publisher, SubscriptionMode
 from .timers import IntervalSpec, IntervalUnit, OnTimerError
 from .topic import Service, Topic
@@ -50,6 +55,20 @@ T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
 
 BINDINGS_ATTR = "__zenode_bindings__"
+METRICS_ATTR = "__zenode_metric__"
+
+MeasureKind = Literal["gauge", "counter"]
+"""What a measurement's value means over time, in Prometheus/OTel vocabulary:
+a ``gauge`` may go up or down, a ``counter`` only ever climbs (and a restart is
+a reset). It decides the exported series' type, which cannot be changed later
+without breaking every query written against it."""
+
+MEASURE_KINDS: tuple[MeasureKind, ...] = ("gauge", "counter")
+
+_MEASURE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+"""What survives being a Prometheus name fragment and an OTLP name segment
+unchanged. Validated at decoration so a typo fails at import, not on the first
+heartbeat — the stance ``NodeConfig(extra="forbid")`` already takes."""
 
 
 @dataclass(frozen=True)
@@ -60,6 +79,21 @@ class Binding:
     target: Topic[Any] | Service[Any, Any] | None = None
     interval: IntervalSpec | None = None
     opts: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Measurement:
+    """One ``@metric`` declaration, stamped onto a method."""
+
+    id: str
+    unit: str = ""
+    kind: MeasureKind = "gauge"
+    integral: bool = False
+    description: str = ""
+    attr: str = ""
+    """Filled in by :func:`collect_metrics`. The value is resolved with
+    ``getattr(self, attr)`` at sample time, exactly as ``_wire_bindings``
+    resolves a handler, so an undecorated override is the one called."""
 
 
 def _stamp(fn: F, binding: Binding) -> F:
@@ -215,6 +249,87 @@ def every(
     return deco
 
 
+def metric(
+    id: str,
+    *,
+    unit: str = "",
+    kind: MeasureKind = "gauge",
+    integral: bool = False,
+    description: str = "",
+) -> Callable[[F], F]:
+    """Put one of this node's own numbers on its health heartbeat.
+
+    The decorated method takes no arguments and returns a number, or ``None``
+    for *unknown* — which is not zero, the promise ``cpu_percent`` already
+    makes::
+
+        @metric("battery_soc", unit="1", description="Pack state of charge.")
+        def _soc(self) -> float | None:
+            return self._driver.soc
+
+        @metric("frames_processed", unit="{frame}", kind="counter", integral=True)
+        def _frames(self) -> int:
+            return self._count
+
+    Like every decorator here it only stamps metadata, so the method stays
+    directly callable in a test. It is evaluated from the health timer, so the
+    same rule applies as to any timer body: **it must not block**, and anything
+    that would belongs in :meth:`~zenode.Node.blocking`. Read a value the node
+    already cached rather than going to fetch one.
+
+    A raising body is logged, counted in ``handler_errors``, and omits that one
+    value; the heartbeat itself is never taken down with it.
+
+    Why declared rather than a dictionary a handler writes into: the set of ids
+    is fixed once the class body executes, and that is what keeps the exported
+    cardinality bounded — a node keying by detected-object id would otherwise
+    defeat it in an afternoon, in someone else's time-series database.
+
+    The fence: **scalars that describe a node's health go on the heartbeat;
+    application state goes behind a read-only service.** A pose, a costmap or a
+    ``BatteryState`` is not a measurement. ``docs/conventions.md`` is normative
+    for ``unit`` — SI on the wire, SoC as 0.0 to 1.0, radians never ``*_deg``.
+
+    Args:
+        id: ``[a-z][a-z0-9_]*``, exported as ``zenode_app_<id>``. It means the
+            same thing fleet-wide, so two nodes declaring it must agree.
+        unit: UCUM, as OTLP expects — ``s``, ``By``, ``1``, ``{frame}``.
+        kind: ``"gauge"`` or ``"counter"`` (cumulative since node start).
+        integral: The value is a whole number, which OTLP encodes differently.
+        description: One line, used as the exported ``HELP``.
+    """
+    if not _MEASURE_ID.match(id):
+        raise ContractError(
+            f"@metric({id!r}): id must match {_MEASURE_ID.pattern} — it becomes a "
+            f"metric name in Prometheus and OTLP, which neither can escape for you"
+        )
+    if id in NodeHealth.model_fields:
+        raise ContractError(
+            f"@metric({id!r}): {id!r} is already a NodeHealth field computed by the "
+            f"runtime; pick a name of your own so the two cannot be confused"
+        )
+    if kind not in MEASURE_KINDS:
+        raise ContractError(f"@metric({id!r}): kind must be one of {', '.join(MEASURE_KINDS)}")
+
+    def deco(fn: F) -> F:
+        if getattr(fn, METRICS_ATTR, None) is not None:
+            # Unlike @subscribe, stacking has no sensible meaning: one callable
+            # produces one number, so a second decorator silently discards one
+            # of the two declarations.
+            raise ContractError(
+                f"@metric({id!r}): {getattr(fn, '__name__', fn)!r} already declares a "
+                f"measurement; one method reports one value"
+            )
+        setattr(
+            fn,
+            METRICS_ATTR,
+            Measurement(id=id, unit=unit, kind=kind, integral=integral, description=description),
+        )
+        return fn
+
+    return deco
+
+
 class publish(Generic[T]):
     """Class-level publisher declaration, materialized at node start.
 
@@ -268,6 +383,42 @@ def collect_bindings(cls: type) -> dict[str, tuple[Binding, ...]]:
             bindings = getattr(member, BINDINGS_ATTR, None)
             if bindings:
                 out[name] = tuple(bindings)
+    return out
+
+
+def collect_metrics(cls: type) -> dict[str, Measurement]:
+    """All ``@metric`` declarations of a class, **id** → measurement.
+
+    Keyed by id rather than by attribute name, which is what lets a subclass
+    replace a parent's measurement by redeclaring its id on a method of its
+    own. Walks the MRO base-first like :func:`collect_bindings`, so an
+    undecorated override still inherits the declaration and is the one called.
+
+    Two attributes of *one* class body claiming the same id is a
+    :class:`~zenode.ContractError`: only one of them could ever be reported,
+    and silently picking is how a measurement goes missing without a message.
+    """
+    out: dict[str, Measurement] = {}
+    for klass in reversed(cls.__mro__):
+        declared_here: dict[str, str] = {}
+        for name, member in vars(klass).items():
+            measurement: Measurement | None = getattr(member, METRICS_ATTR, None)
+            if measurement is None:
+                continue
+            clash = declared_here.get(measurement.id)
+            if clash is not None:
+                raise ContractError(
+                    f"{klass.__name__}.{name} and {klass.__name__}.{clash} both declare "
+                    f"the measurement {measurement.id!r}; ids are unique per node"
+                )
+            declared_here[measurement.id] = name
+            # A re-decorated attribute replaces its own inherited declaration
+            # outright — otherwise changing an id would leave the old one
+            # behind, still pointing at the same method.
+            for inherited_id, inherited in list(out.items()):
+                if inherited.attr == name and inherited_id != measurement.id:
+                    del out[inherited_id]
+            out[measurement.id] = replace(measurement, attr=name)
     return out
 
 

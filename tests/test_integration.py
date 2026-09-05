@@ -14,12 +14,13 @@ from zenode import (
     ServiceError,
     ServiceTimeout,
     Topic,
+    metric,
     on_silence,
     publish,
     subscribe,
 )
 from zenode.envelope import encode_envelope
-from zenode.msgs import NodeHealth
+from zenode.msgs import NodeHealth, NodeInfo, info_key
 from zenode.presence import list_nodes_async
 from zenode.testing import harness
 
@@ -240,6 +241,40 @@ async def test_health_heartbeat():
         assert health.node == "chatty"
         assert health.state == "running"
         assert health.uptime_s >= 0.0
+
+
+async def test_a_measurement_reaches_the_heartbeat_and_its_catalog_a_late_joiner():
+    """The two halves of a measurement, hot and cold, over a real session."""
+
+    class Measured(EchoNode):
+        name = "measured"
+        health_interval = 0.1
+
+        @metric("battery_soc", unit="1", description="Pack state of charge.")
+        def _soc(self) -> float:
+            return 0.87
+
+        @metric("dead_sensor")
+        def _dead(self) -> float:
+            raise RuntimeError("the BMS is not answering")
+
+    async with harness() as h:
+        health = h.collect(Topic("node/measured/health", NodeHealth))
+        await h.start_node(Measured)
+
+        beat = await health.next()
+        while not beat.measures:  # the first beat may precede on_start finishing
+            beat = await health.next()
+        assert beat.measures == {"battery_soc": 0.87}  # the raising one is absent
+        assert beat.handler_errors >= 1  # …and counted, without losing the beat
+
+        # Subscribed only now: the catalog comes from the zenoh-ext cache, which
+        # is the whole reason the descriptor is latched rather than queryable.
+        out = h.collect(Topic(info_key("measured"), NodeInfo, latched=True))
+        info = await out.next()
+        soc = next(m for m in info.measures if m.id == "battery_soc")
+        assert soc.unit == "1" and soc.kind == "gauge"
+        assert info.host and info.zenode
 
 
 async def test_timer_runs_and_survives_errors():

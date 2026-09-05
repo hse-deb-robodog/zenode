@@ -150,12 +150,13 @@ on. [Nodes](nodes.md) covers everything a single process does.
 
 ## Design notes
 
-Proposals, not features. Each records a design that has not been built, with
-the trade-offs and the alternatives that were rejected, so the decision can be
-taken deliberately or dropped on purpose.
+Where a design was taken, the note is kept for its trade-offs and its rejected
+alternatives — the reasoning the code no longer states. Where it was not, the
+note records a proposal, so the decision can still be taken deliberately or
+dropped on purpose. The status line at the top of each says which it is.
 
-| Note | Question it answers |
-|---|---|
-| [Live topic discovery](design/live-topics.md) | How to see what is actually on the bus right now, and how it differs from the contract |
-| [Node-defined measurements](design/node-measures.md) | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
-| [OpenSOVD adapter](design/opensovd-adapter.md) | Whether zenode should speak [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics, and what that would cost |
+| Note | Status | Question it answers |
+|---|---|---|
+| [Live topic discovery](design/live-topics.md) | partly built | How to see what is actually on the bus right now, and how it differs from the contract |
+| [Node-defined measurements](design/node-measures.md) | built | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
+| [OpenSOVD adapter](design/opensovd-adapter.md) | proposal | Whether zenode should speak [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics, and what that would cost |

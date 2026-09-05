@@ -278,6 +278,28 @@ def test_zenoh_config_carries_listen_and_timestamping():
     assert cfg.get_json("timestamping/enabled") == "false"
 
 
+# -------------------------------------------------------------------- host
+
+
+def test_host_defaults_to_empty_meaning_the_machines_own_name():
+    """Empty is what tells `Node` to fall back to `socket.gethostname()`."""
+    assert TransportConfig().host == ""
+
+
+def test_host_comes_from_the_transport_section(tmp_path):
+    path = tmp_path / "zenode.toml"
+    path.write_text('[transport]\nhost = "jetson"\n')
+    assert load_transport_config(path, env={}).host == "jetson"
+
+
+def test_host_takes_an_env_override(tmp_path):
+    """A container's hostname is a random hex id; the deployment supplies a name."""
+    path = tmp_path / "zenode.toml"
+    path.write_text('[transport]\nhost = "jetson"\n')
+    transport = load_transport_config(path, env={"ZENODE_TRANSPORT__HOST": "jetson-perception"})
+    assert transport.host == "jetson-perception"
+
+
 def test_zenoh_config_applies_raw_overrides():
     """The escape hatch has to reach settings zenode does not model."""
     transport = TransportConfig(overrides={"scouting/multicast/interface": "eth0"})
