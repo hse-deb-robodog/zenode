@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from zenode import exporter as exporter_module
 from zenode.exporter import Registry, Sample, make_server, render
 from zenode.msgs.health import NodeHealth
 from zenode.msgs.info import MeasureDescriptor, NodeInfo
@@ -34,6 +33,14 @@ def _health(node: str = "camera", **kwargs: Any) -> NodeHealth:
 
 def _lines(text: str, prefix: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith(prefix)]
+
+
+@pytest.fixture
+def clock(monkeypatch) -> dict[str, float]:
+    """A hand-cranked monotonic clock, for aging a registry's samples."""
+    fake = {"now": 10.0}
+    monkeypatch.setattr(time, "monotonic", lambda: fake["now"])
+    return fake
 
 
 def _value(text: str, prefix: str) -> str:
@@ -88,10 +95,13 @@ def test_last_seen_grows_with_silence():
     assert _value(text, "zenode_node_last_seen_seconds") == "4.5"
 
 
-def test_stale_nodes_are_dropped_entirely():
+def test_stale_nodes_are_dropped_entirely(clock):
     """Frozen counters read as a healthy node doing nothing; absence does not."""
-    samples = {"camera": Sample(_health("camera"), 100.0), "gone": Sample(_health("gone"), 10.0)}
-    text = render(samples, "", now=100.0, stale_after=60.0)
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("gone").model_dump_json().encode())
+    clock["now"] = 100.0
+    registry.offer(_health("camera").model_dump_json().encode())
+    text = registry.render()
     assert 'node="camera"' in text
     assert 'node="gone"' not in text
 
@@ -182,9 +192,8 @@ def test_a_node_whose_own_catalog_has_not_arrived_is_left_out_of_a_shared_series
     assert 'node="camera"' in _lines(text, "zenode_app_battery_soc{")[0]
 
 
-def test_two_kinds_for_one_id_export_the_first_node_in_sorted_order(caplog):
+def test_two_kinds_for_one_id_export_the_first_node_in_sorted_order():
     """One Prometheus name cannot carry two types; the rule must be stable."""
-    exporter_module._kind_conflicts_logged.clear()
     samples = {
         "camera": Sample(_health("camera", measures={"widgets": 1.0}), 100.0),
         "motors": Sample(_health("motors", measures={"widgets": 2.0}), 100.0),
@@ -193,15 +202,25 @@ def test_two_kinds_for_one_id_export_the_first_node_in_sorted_order(caplog):
         "camera": _catalog("camera", widgets={"kind": "gauge"}),
         "motors": _catalog("motors", widgets={"kind": "counter"}),
     }
-    with caplog.at_level("WARNING", logger="zenode.exporter"):
-        text = render(samples, "", now=100.0, catalogs=catalogs)
-        render(samples, "", now=100.0, catalogs=catalogs)  # a second scrape
-
+    text = render(samples, "", now=100.0, catalogs=catalogs)
     assert "# TYPE zenode_app_widgets gauge" in text
     assert _lines(text, "zenode_app_widgets_total") == []
     assert len(_lines(text, "zenode_app_widgets{")) == 1
     assert 'node="camera"' in _lines(text, "zenode_app_widgets{")[0]
-    # Logged once, not once per scrape: a deployment mistake is not news at 15s.
+
+
+def test_a_kind_conflict_is_logged_once_however_often_the_registry_is_read(caplog):
+    """A deployment mistake is not news on every 15-second scrape or push."""
+    registry = Registry("")
+    registry.offer(_health("camera", measures={"widgets": 1.0}).model_dump_json().encode())
+    registry.offer(_health("motors", measures={"widgets": 2.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("camera", widgets={"kind": "gauge"}).model_dump_json().encode())
+    registry.offer_info(_catalog("motors", widgets={"kind": "counter"}).model_dump_json().encode())
+    with caplog.at_level("WARNING", logger="zenode.exporter"):
+        text = registry.render()  # a scrape
+        registry.snapshot()  # what a push reads
+
+    assert "# TYPE zenode_app_widgets gauge" in text
     assert len([r for r in caplog.records if "widgets" in r.getMessage()]) == 1
 
 
@@ -216,33 +235,34 @@ def test_a_measurement_absent_from_this_heartbeat_is_simply_not_reported():
     assert _lines(text, "zenode_app_") == []
 
 
-def test_a_stale_node_takes_its_app_series_with_it():
-    samples = {"gone": Sample(_health("gone", measures={"battery_soc": 0.5}), 10.0)}
-    text = render(samples, "", now=100.0, catalogs={"gone": _catalog("gone", battery_soc={})})
-    assert _lines(text, "zenode_app_") == []
+def test_a_stale_node_takes_its_app_series_with_it(clock):
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("gone", measures={"battery_soc": 0.5}).model_dump_json().encode())
+    registry.offer_info(_catalog("gone", battery_soc={}).model_dump_json().encode())
+    clock["now"] = 100.0
+    assert _lines(registry.render(), "zenode_app_") == []
 
 
-def test_a_dead_nodes_descriptor_cannot_win_a_kind_conflict():
+def test_a_dead_nodes_descriptor_cannot_win_a_kind_conflict(clock, caplog):
     """`offer_info` keeps a descriptor after its node dies; conflicts must not.
 
     Otherwise a node decommissioned an hour ago takes a live node's series off
-    `/metrics` while the push path — which resolves over `snapshot()`'s live set
-    — carries it normally, and one registry gives two answers.
+    `/metrics` while the push path — which reads the same snapshot — carries it
+    normally, and one registry gives two answers.
     """
-    exporter_module._kind_conflicts_logged.clear()
-    samples = {
-        "alpha": Sample(_health("alpha", measures={"widgets": 1.0}), 10.0),  # stale
-        "zulu": Sample(_health("zulu", measures={"widgets": 2.0}), 100.0),
-    }
-    catalogs = {
-        "alpha": _catalog("alpha", widgets={"kind": "counter"}),
-        "zulu": _catalog("zulu", widgets={"kind": "gauge"}),
-    }
-    text = render(samples, "", now=100.0, catalogs=catalogs)
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("alpha", measures={"widgets": 1.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("alpha", widgets={"kind": "counter"}).model_dump_json().encode())
+    clock["now"] = 100.0  # alpha is now stale …
+    registry.offer(_health("zulu", measures={"widgets": 2.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("zulu", widgets={"kind": "gauge"}).model_dump_json().encode())
+
+    with caplog.at_level("WARNING", logger="zenode.exporter"):
+        text = registry.render()
     assert "# TYPE zenode_app_widgets gauge" in text
     assert 'zenode_app_widgets{namespace="",node="zulu"} 2' in text
     # …and the once-only warning is not burned by a node nobody can see.
-    assert exporter_module._kind_conflicts_logged == set()
+    assert [r for r in caplog.records if "widgets" in r.getMessage()] == []
 
 
 def test_a_counter_past_a_million_is_rendered_exactly():

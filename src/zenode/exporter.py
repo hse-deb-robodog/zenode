@@ -275,12 +275,6 @@ def format_value(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
 
 
-_kind_conflicts_logged: set[str] = set()
-"""Measure ids already reported as declared with two different kinds. Bounded by
-the number of declared ids, and it exists so a scrape every 15 seconds does not
-turn one deployment mistake into a log every 15 seconds."""
-
-
 def app_series_name(descriptor: MeasureDescriptor) -> str:
     """The Prometheus series name for one measurement.
 
@@ -302,27 +296,18 @@ def app_descriptors(catalogs: dict[str, NodeInfo]) -> dict[str, MeasureDescripto
 
     One Prometheus name cannot carry two types. Where two nodes declare the same
     id with a different ``kind``, the first node in sorted order wins and the
-    others' points are omitted by :func:`render` — an arbitrary but *stable*
-    rule, which matters more than which one wins, because a series whose type
-    flips between scrapes is worse than a missing one. An id is meant to mean
-    the same thing fleet-wide; a conflict is a deployment mistake, so it is
-    logged (once).
+    others' points are omitted by :func:`render` and
+    :func:`zenode.otlp_metrics.encode` alike — an arbitrary but *stable* rule,
+    which matters more than which one wins, because a series whose type flips
+    between scrapes is worse than a missing one. Pure resolution only: an id
+    meant to mean the same thing fleet-wide declared with two kinds is a
+    deployment mistake, and reporting it needs a memory, which belongs to
+    :meth:`Registry.snapshot` rather than a formatter.
     """
     chosen: dict[str, MeasureDescriptor] = {}
     for node in sorted(catalogs):
         for descriptor in catalogs[node].measures:
-            first = chosen.setdefault(descriptor.id, descriptor)
-            if first.kind != descriptor.kind and descriptor.id not in _kind_conflicts_logged:
-                _kind_conflicts_logged.add(descriptor.id)
-                logger.warning(
-                    "measurement %r is declared as %s by one node and %s by %r; "
-                    "exporting the first and omitting the rest — an id must mean "
-                    "the same thing fleet-wide",
-                    descriptor.id,
-                    first.kind,
-                    descriptor.kind,
-                    node,
-                )
+            chosen.setdefault(descriptor.id, descriptor)
     return chosen
 
 
@@ -335,15 +320,12 @@ def render_app(
     guessed at: latched delivery makes that gap transient, and a series whose
     ``TYPE`` flips mid-history is worse than a short hole.
 
-    Conflicts are resolved over the **live** node set only, which is what keeps
-    a scrape and a push agreeing. ``Registry.offer_info`` keeps a descriptor
-    after its node dies, so without this a node decommissioned an hour ago would
-    still win the sorted-first tie-break here — and take a live node's series
-    off ``/metrics`` — while :meth:`Registry.snapshot` had already dropped it
-    from the push.
+    ``catalogs`` must already be joined to the live rows, which
+    :meth:`Registry.snapshot` guarantees. ``Registry.offer_info`` keeps a
+    descriptor after its node dies, so a stale catalog reaching this far could
+    win :func:`app_descriptors`' sorted-first tie-break and take a live node's
+    series off ``/metrics``.
     """
-    live_names = {name for name, _ in live}
-    catalogs = {node: info for node, info in catalogs.items() if node in live_names}
     if not catalogs:
         return []
     declared = {node: {d.id: d for d in info.measures} for node, info in catalogs.items()}
@@ -391,23 +373,20 @@ def render(
     namespace: str,
     *,
     now: float,
-    stale_after: float = DEFAULT_STALE_AFTER,
     self_stats: dict[str, dict[str, int]] | None = None,
     catalogs: dict[str, NodeInfo] | None = None,
 ) -> str:
-    """The full exposition, as one string. Pure — no clock, no socket.
+    """The full exposition, as one string. Pure — no clock, no socket, no filter.
 
-    Nodes not heard from in ``stale_after`` seconds are omitted entirely, so
-    their series go absent rather than freezing at their last value and reading
-    as a healthy node that stopped doing anything.
+    ``samples`` are taken to *be* the live set: deciding which nodes still count
+    happens once, in :meth:`Registry.snapshot`, for every export path. ``now``
+    only ages the heartbeats for ``zenode_node_last_seen_seconds``.
 
     ``catalogs`` are the nodes' :class:`~zenode.msgs.info.NodeInfo` descriptors,
     which supply the ``TYPE`` and ``HELP`` for their ``@metric`` measurements —
     without one for a node, that node contributes no ``zenode_app_`` series.
     """
-    live = sorted(
-        (name, sample) for name, sample in samples.items() if now - sample.at <= stale_after
-    )
+    live = sorted(samples.items())
     lines: list[str] = []
 
     lines.append("# HELP zenode_node_info Node identity and lifecycle state.")
@@ -460,6 +439,11 @@ class Registry:
         """Set by the caller to also publish the exporter's own counters."""
         self._samples: dict[str, Sample] = {}
         self._catalogs: dict[str, NodeInfo] = {}
+        self._kind_conflicts_logged: set[str] = set()
+        """Measure ids already reported as declared with two different kinds.
+        Bounded by the number of declared ids, and it exists so a scrape every
+        15 seconds does not turn one deployment mistake into a log every 15
+        seconds."""
         self._lock = threading.Lock()
 
     def offer(self, payload: bytes) -> None:
@@ -494,8 +478,14 @@ class Registry:
     def snapshot(self) -> tuple[dict[str, Sample], dict[str, NodeInfo]]:
         """Every node heard from recently enough to still count, and its catalog.
 
-        Both under one lock, and shared by both export paths, so a scrape and a
-        push made a moment apart report the same nodes and the same types.
+        The **only** place liveness is decided. Both under one lock, and shared
+        by both export paths, so a scrape and a push made a moment apart report
+        the same nodes and the same types. A stale node's series go absent
+        rather than freezing at their last value and reading as a healthy node
+        that stopped doing anything.
+
+        Kind conflicts are reported here too: every export funnels through this
+        method, so the once-only warning holds however many paths are wired up.
         """
         now = time.monotonic()
         with self._lock:
@@ -505,17 +495,40 @@ class Registry:
                 if now - sample.at <= self.stale_after
             }
             catalogs = {n: self._catalogs[n] for n in samples if n in self._catalogs}
-            return samples, catalogs
+        self._warn_kind_conflicts(catalogs)
+        return samples, catalogs
+
+    def _warn_kind_conflicts(self, catalogs: dict[str, NodeInfo]) -> None:
+        """Log each measure id declared with two kinds — once per registry.
+
+        Phrased against :func:`app_descriptors`' output so the warning can never
+        disagree with what the formatters actually export. Runs on the live
+        catalog set only: a node decommissioned an hour ago must neither win the
+        resolution nor burn the once-only warning on a conflict nobody can see.
+        """
+        chosen = app_descriptors(catalogs)
+        for node in sorted(catalogs):
+            for descriptor in catalogs[node].measures:
+                first = chosen[descriptor.id]
+                if first.kind == descriptor.kind or descriptor.id in self._kind_conflicts_logged:
+                    continue
+                self._kind_conflicts_logged.add(descriptor.id)
+                logger.warning(
+                    "measurement %r is declared as %s by one node and %s by %r; "
+                    "exporting the first and omitting the rest — an id must mean "
+                    "the same thing fleet-wide",
+                    descriptor.id,
+                    first.kind,
+                    descriptor.kind,
+                    node,
+                )
 
     def render(self) -> str:
-        with self._lock:
-            samples = dict(self._samples)
-            catalogs = dict(self._catalogs)
+        samples, catalogs = self.snapshot()
         return render(
             samples,
             self.namespace,
             now=time.monotonic(),
-            stale_after=self.stale_after,
             self_stats=self.self_stats() if self.self_stats else None,
             catalogs=catalogs,
         )
