@@ -117,9 +117,9 @@ def test_collection_is_keyed_by_id_and_carries_the_attribute():
     metrics = collect_metrics(Base)
     assert set(metrics) == {"battery_soc", "frames_processed"}
     assert metrics["battery_soc"].attr == "_soc"
-    assert metrics["battery_soc"].unit == "1"
-    assert metrics["frames_processed"].kind == "counter"
-    assert metrics["frames_processed"].integral is True
+    assert metrics["battery_soc"].descriptor.unit == "1"
+    assert metrics["frames_processed"].descriptor.kind == "counter"
+    assert metrics["frames_processed"].descriptor.integral is True
 
 
 def test_an_undecorated_override_inherits_the_declaration():
@@ -144,8 +144,8 @@ def test_a_subclass_replaces_a_parents_measurement_by_redeclaring_its_id():
 
     metrics = collect_metrics(Child)
     assert metrics["battery_soc"].attr == "_soc_from_bms"
-    assert metrics["battery_soc"].description == "From the BMS instead."
-    assert len([m for m in metrics.values() if m.id == "battery_soc"]) == 1
+    assert metrics["battery_soc"].descriptor.description == "From the BMS instead."
+    assert len([m for m in metrics.values() if m.descriptor.id == "battery_soc"]) == 1
 
 
 def test_redecorating_an_attribute_with_a_new_id_drops_the_old_one():

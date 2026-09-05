@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from .metrics import Latency, ProcessStats, summarize
 from .msgs.health import NodeHealth, NodeState
-from .msgs.info import EntityInfo, MeasureDescriptor, NodeInfo, ServiceInfo
+from .msgs.info import EntityInfo, NodeInfo, ServiceInfo
 from .topic import Service, Topic, topic_flags
 
 if TYPE_CHECKING:
@@ -253,16 +253,7 @@ class Reporter:
                 )
                 for server in s.servers
             ],
-            measures=[
-                MeasureDescriptor(
-                    id=m.id,
-                    unit=m.unit,
-                    kind=m.kind,
-                    integral=m.integral,
-                    description=m.description,
-                )
-                for m in s.metrics.values()
-            ],
+            measures=[m.descriptor for m in s.metrics.values()],
         )
 
     def _sample(self) -> dict[str, float]:
@@ -286,10 +277,10 @@ class Reporter:
                 self._measure_errors += 1
                 self._sources.log.exception(
                     "measurement failed; omitting it from this heartbeat",
-                    extra={"measure": measurement.id},
+                    extra={"measure": measurement.descriptor.id},
                 )
                 continue
             if number is None or not math.isfinite(number):
                 continue
-            sampled[measurement.id] = number
+            sampled[measurement.descriptor.id] = number
         return sampled

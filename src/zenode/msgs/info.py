@@ -27,6 +27,12 @@ from pydantic import BaseModel
 
 from ..topic import resolve_key
 
+MeasureKind = Literal["gauge", "counter"]
+"""What a measurement's value means over time, in Prometheus/OTel vocabulary:
+a ``gauge`` may go up or down, a ``counter`` only ever climbs (and a restart is
+a reset). It decides the exported series' type, which cannot be changed later
+without breaking every query written against it."""
+
 
 def info_key(name: str) -> str:
     """The key, relative to the namespace, that ``name`` publishes its descriptor on."""
@@ -73,6 +79,10 @@ class ServiceInfo(BaseModel):
 class MeasureDescriptor(BaseModel):
     """The static half of one ``@metric`` declaration.
 
+    Constructed by ``@metric`` itself, so what the decorator stamped and what
+    the descriptor publishes are one object — there is no second spelling of
+    "what a measure is" for the two to disagree over.
+
     There is no separate ``name``: the ``id`` *is* the name, and two identifiers
     for one thing is exactly the drift that keeping a single table prevents.
     """
@@ -81,7 +91,7 @@ class MeasureDescriptor(BaseModel):
     unit: str = ""
     """UCUM, as OTLP expects: ``s``, ``By``, ``1``, ``{frame}``.
     :doc:`../conventions` is normative — SI on the wire, SoC as 0.0 to 1.0."""
-    kind: Literal["gauge", "counter"] = "gauge"
+    kind: MeasureKind = "gauge"
     integral: bool = False
     """Whether the value is a whole number, which OTLP encodes differently."""
     description: str = ""

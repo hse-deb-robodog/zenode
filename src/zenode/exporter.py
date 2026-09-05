@@ -47,6 +47,14 @@ APP_PREFIX = "zenode_app_"
 ``zenode_node_`` names — so a field added to ``NodeHealth`` in a later release
 can never collide with someone's ``@metric``."""
 
+OTLP_APP_PREFIX = "zenode.app."
+"""The same namespace in OTLP's dotted spelling, used by the push path. A
+collector normalises ``zenode.app.battery_soc`` back to
+``zenode_app_battery_soc``, so both export paths land on one series. Defined
+beside :data:`APP_PREFIX` for the reason :data:`COUNTERS` is shared with
+``otlp_metrics``: two spellings of one namespace in two files is how they
+drift."""
+
 DEFAULT_STALE_AFTER = 60.0
 """Seconds without a heartbeat before a node's series are dropped entirely.
 

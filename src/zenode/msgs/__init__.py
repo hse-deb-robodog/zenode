@@ -7,13 +7,22 @@ own contract package, where they can evolve with the robot.
 
 from .geometry import Pose, Pose2D, Quaternion, Transform, Twist, Vector3
 from .health import NodeHealth, NodeState, health_key, health_pattern
-from .info import EntityInfo, MeasureDescriptor, NodeInfo, ServiceInfo, info_key, info_pattern
+from .info import (
+    EntityInfo,
+    MeasureDescriptor,
+    MeasureKind,
+    NodeInfo,
+    ServiceInfo,
+    info_key,
+    info_pattern,
+)
 from .log import LogRecordMsg, log_key, log_pattern
 
 __all__ = [
     "EntityInfo",
     "LogRecordMsg",
     "MeasureDescriptor",
+    "MeasureKind",
     "NodeHealth",
     "NodeInfo",
     "NodeState",

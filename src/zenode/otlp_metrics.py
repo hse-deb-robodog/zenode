@@ -26,16 +26,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .exporter import COUNTERS, GAUGES, Registry, Sample, app_descriptors
+from .exporter import COUNTERS, GAUGES, OTLP_APP_PREFIX, Registry, Sample, app_descriptors
 from .msgs.info import NodeInfo
 from .otlp_logs import TIMEOUT
 
 logger = logging.getLogger(__name__)
-
-APP_PREFIX = "zenode.app."
-"""Dotted counterpart of :data:`zenode.exporter.APP_PREFIX`. A collector
-normalises ``zenode.app.battery_soc`` back to ``zenode_app_battery_soc``, so
-both export paths land on one series."""
 
 DEFAULT_INTERVAL = 15.0
 """Matches Prometheus's usual scrape interval: these are heartbeat-derived
@@ -173,7 +168,7 @@ def encode(
             )
             metrics.append(
                 _body(
-                    f"{APP_PREFIX}{descriptor.id}",
+                    f"{OTLP_APP_PREFIX}{descriptor.id}",
                     descriptor.unit,
                     descriptor.description,
                     point,

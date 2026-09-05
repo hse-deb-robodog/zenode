@@ -43,10 +43,11 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Generic, Literal, TypeVar, overload
+from typing import Any, Generic, Literal, TypeVar, get_args, overload
 
 from .errors import ContractError
 from .msgs.health import NodeHealth
+from .msgs.info import MeasureDescriptor, MeasureKind
 from .pubsub import OnDeadline, Publisher, SubscriptionMode
 from .timers import IntervalSpec, IntervalUnit, OnTimerError
 from .topic import Service, Topic
@@ -57,13 +58,9 @@ F = TypeVar("F", bound=Callable[..., Any])
 BINDINGS_ATTR = "__zenode_bindings__"
 METRICS_ATTR = "__zenode_metric__"
 
-MeasureKind = Literal["gauge", "counter"]
-"""What a measurement's value means over time, in Prometheus/OTel vocabulary:
-a ``gauge`` may go up or down, a ``counter`` only ever climbs (and a restart is
-a reset). It decides the exported series' type, which cannot be changed later
-without breaking every query written against it."""
-
-MEASURE_KINDS: tuple[MeasureKind, ...] = ("gauge", "counter")
+MEASURE_KINDS: tuple[MeasureKind, ...] = get_args(MeasureKind)
+"""Derived from the wire model's Literal, so this check and what a
+:class:`~zenode.msgs.MeasureDescriptor` accepts are one spelling."""
 
 _MEASURE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 """What survives being a Prometheus name fragment and an OTLP name segment
@@ -85,15 +82,15 @@ class Binding:
 class Measurement:
     """One ``@metric`` declaration, stamped onto a method."""
 
-    id: str
-    unit: str = ""
-    kind: MeasureKind = "gauge"
-    integral: bool = False
-    description: str = ""
+    descriptor: MeasureDescriptor
+    """The static half — id, unit, kind, integral, description — as the wire
+    model itself. The node's descriptor publishes this object verbatim, so what
+    ``@metric`` declared and what ``zenode info`` shows cannot drift."""
     attr: str = ""
-    """Filled in by :func:`collect_metrics`. The value is resolved with
-    ``getattr(self, attr)`` at sample time, exactly as ``_wire_bindings``
-    resolves a handler, so an undecorated override is the one called."""
+    """The runtime half, filled in by :func:`collect_metrics`. The value is
+    resolved with ``getattr(self, attr)`` at sample time, exactly as
+    ``_wire_bindings`` resolves a handler, so an undecorated override is the
+    one called."""
 
 
 def _stamp(fn: F, binding: Binding) -> F:
@@ -323,7 +320,11 @@ def metric(
         setattr(
             fn,
             METRICS_ATTR,
-            Measurement(id=id, unit=unit, kind=kind, integral=integral, description=description),
+            Measurement(
+                MeasureDescriptor(
+                    id=id, unit=unit, kind=kind, integral=integral, description=description
+                )
+            ),
         )
         return fn
 
@@ -405,20 +406,21 @@ def collect_metrics(cls: type) -> dict[str, Measurement]:
             measurement: Measurement | None = getattr(member, METRICS_ATTR, None)
             if measurement is None:
                 continue
-            clash = declared_here.get(measurement.id)
+            measure_id = measurement.descriptor.id
+            clash = declared_here.get(measure_id)
             if clash is not None:
                 raise ContractError(
                     f"{klass.__name__}.{name} and {klass.__name__}.{clash} both declare "
-                    f"the measurement {measurement.id!r}; ids are unique per node"
+                    f"the measurement {measure_id!r}; ids are unique per node"
                 )
-            declared_here[measurement.id] = name
+            declared_here[measure_id] = name
             # A re-decorated attribute replaces its own inherited declaration
             # outright — otherwise changing an id would leave the old one
             # behind, still pointing at the same method.
             for inherited_id, inherited in list(out.items()):
-                if inherited.attr == name and inherited_id != measurement.id:
+                if inherited.attr == name and inherited_id != measure_id:
                     del out[inherited_id]
-            out[measurement.id] = replace(measurement, attr=name)
+            out[measure_id] = replace(measurement, attr=name)
     return out
 
 

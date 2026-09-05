@@ -100,7 +100,8 @@ Every counter a subscription/timer/server keeps (`received`, `dropped`, `stale`,
 **Out-of-process tooling** (`cli.py`, `exporter.py`, `otlp_logs.py`, `otlp_metrics.py`). Nodes
 publish health/logs on the bus; `zenode export` is a sidecar that re-serves them for Prometheus
 pull or pushes OTLP. Nodes themselves never link a metrics SDK. `exporter.py`'s `COUNTERS`/`GAUGES`
-table is shared with `otlp_metrics.py` so pull and push can't drift apart.
+table and the `APP_PREFIX`/`OTLP_APP_PREFIX` pair are shared with `otlp_metrics.py` so pull and
+push can't drift apart.
 
 **Testing** (`testing.py`). `harness()` opens one peer-mode session with multicast off; zenoh
 routes matching pub/sub in-process, so typed round trips need no router. An internal `_Probe`

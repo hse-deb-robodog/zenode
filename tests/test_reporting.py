@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from zenode import Service, Topic
 from zenode.declarative import Measurement
 from zenode.metrics import Latency, ProcessStats
+from zenode.msgs import MeasureDescriptor
 from zenode.reporting import Reporter, ReporterSources, _entity_info
 from zenode.topic import topic_flags
 
@@ -125,8 +126,8 @@ def reporter(**kwargs: Any) -> Reporter:
 def test_sampled_values_reach_the_heartbeats_measures():
     r = reporter(
         metrics={
-            "battery_soc": Measurement(id="battery_soc", attr="_soc"),
-            "frames": Measurement(id="frames", attr="_frames"),
+            "battery_soc": Measurement(MeasureDescriptor(id="battery_soc"), attr="_soc"),
+            "frames": Measurement(MeasureDescriptor(id="frames"), attr="_frames"),
         },
         measured={"_soc": lambda: 0.5, "_frames": lambda: 7},
     )
@@ -136,7 +137,7 @@ def test_sampled_values_reach_the_heartbeats_measures():
 def test_none_is_absent_rather_than_zero():
     """Unknown is not zero — the promise `cpu_percent` already makes."""
     r = reporter(
-        metrics={"soc": Measurement(id="soc", attr="_soc")},
+        metrics={"soc": Measurement(MeasureDescriptor(id="soc"), attr="_soc")},
         measured={"_soc": lambda: None},
     )
     health = r.build_health()
@@ -148,7 +149,7 @@ def test_none_is_absent_rather_than_zero():
 def test_a_non_finite_value_is_omitted_but_is_not_an_error(bad):
     """A NaN serializes as invalid OTLP JSON and takes a whole push with it."""
     r = reporter(
-        metrics={"wobble": Measurement(id="wobble", attr="_wobble")},
+        metrics={"wobble": Measurement(MeasureDescriptor(id="wobble"), attr="_wobble")},
         measured={"_wobble": lambda: bad},
     )
     health = r.build_health()
@@ -163,8 +164,8 @@ def _raising() -> float:
 def test_a_raising_measurement_is_counted_omitted_and_cumulative():
     r = reporter(
         metrics={
-            "soc": Measurement(id="soc", attr="_soc"),
-            "frames": Measurement(id="frames", attr="_frames"),
+            "soc": Measurement(MeasureDescriptor(id="soc"), attr="_soc"),
+            "frames": Measurement(MeasureDescriptor(id="frames"), attr="_frames"),
         },
         measured={"_soc": _raising, "_frames": lambda: 3},
     )
@@ -176,7 +177,7 @@ def test_a_raising_measurement_is_counted_omitted_and_cumulative():
 
 def test_a_non_numeric_return_is_counted_rather_than_crashing_the_beat():
     r = reporter(
-        metrics={"soc": Measurement(id="soc", attr="_soc")},
+        metrics={"soc": Measurement(MeasureDescriptor(id="soc"), attr="_soc")},
         measured={"_soc": lambda: "0.87 volts"},
     )
     health = r.build_health()
@@ -261,23 +262,18 @@ def test_the_host_reaches_the_heartbeat_and_the_descriptor():
     assert r.build_info().host == "jetson"
 
 
-def test_the_measure_catalog_carries_unit_kind_and_description():
+def test_the_measure_catalog_is_the_declared_descriptors_verbatim():
+    """No field-by-field copy: what ``@metric`` stamped is what goes out."""
+    soc = MeasureDescriptor(id="battery_soc", unit="1", description="Pack state of charge.")
+    frames = MeasureDescriptor(id="frames_processed", kind="counter", integral=True)
     r = reporter(
         metrics={
-            "battery_soc": Measurement(
-                id="battery_soc", unit="1", description="Pack state of charge.", attr="_soc"
-            ),
-            "frames_processed": Measurement(
-                id="frames_processed", kind="counter", integral=True, attr="_frames"
-            ),
+            "battery_soc": Measurement(soc, attr="_soc"),
+            "frames_processed": Measurement(frames, attr="_frames"),
         }
     )
-    catalog = {m.id: m for m in r.build_info().measures}
-    assert set(catalog) == {"battery_soc", "frames_processed"}
-    assert catalog["battery_soc"].unit == "1"
-    assert catalog["battery_soc"].description == "Pack state of charge."
-    assert catalog["frames_processed"].kind == "counter"
-    assert catalog["frames_processed"].integral is True
+    assert r.build_info().measures == [soc, frames]
+    assert r.build_info().measures[0] is soc
 
 
 def test_the_descriptor_lists_what_the_node_wired():
