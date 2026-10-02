@@ -32,6 +32,7 @@ from zenode.cli import (
     cmd_health,
     cmd_hz,
     cmd_nodes,
+    cmd_sovd,
     cmd_topics,
     main,
 )
@@ -824,3 +825,75 @@ def test_main_exits_quietly_when_the_reader_closes_the_pipe(monkeypatch):
     assert exit_info.value.code == 128 + signal.SIGPIPE
     assert sys.stdout.name == os.devnull
     sys.stdout.close()
+
+
+# ------------------------------------------------------------------------ sovd
+
+
+def test_sovd_defaults_to_loopback_and_the_sovd_mount(monkeypatch, cli_args):
+    """Anyone with a browser is a SOVD client, so the exporter's all-interfaces default
+    does not transfer."""
+    made: dict[str, object] = {}
+
+    class _Server:
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            made["closed"] = True
+
+    class _Sidecar:
+        def __init__(self, session, namespace, **kw) -> None:
+            made["sidecar"] = (namespace, kw)
+
+        def start(self) -> None:
+            made["started"] = True
+
+        def stop(self) -> None:
+            made["stopped"] = True
+
+    def _make_server(bridge, host, port, **kw):
+        made["listen"] = (host, port, kw)
+        return _Server()
+
+    session = MagicMock()
+    monkeypatch.setattr("zenode.cli._open_session", MagicMock(return_value=session))
+    monkeypatch.setattr("zenode.sovd.Sidecar", _Sidecar)
+    monkeypatch.setattr("zenode.sovd.make_server", _make_server)
+    args = cli_args(
+        listen="127.0.0.1:7690",
+        base_uri="/sovd",
+        retain_gone=600.0,
+        max_gone=64,
+        log_buffer=1000,
+        max_calls=32,
+        call_timeout=2.0,
+        namespace="robodog",
+    )
+    assert cmd_sovd(args) == 0
+    assert made["listen"] == ("127.0.0.1", 7690, {"base_uri": "/sovd"})
+    assert made["sidecar"][0] == "robodog"  # type: ignore[index]
+    assert made["started"] and made["stopped"] and made["closed"]
+    session.close.assert_called_once()
+
+
+def test_sovd_argv_wiring(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake(args):
+        captured.update(vars(args))
+        return 0
+
+    monkeypatch.setattr("zenode.cli.cmd_sovd", fake)
+    with pytest.raises(SystemExit) as e:
+        main(["sovd", "--listen", ":7700", "--max-calls", "4"])
+    assert e.value.code == 0
+    assert captured["listen"] == ":7700" and captured["max_calls"] == 4
+    assert captured["base_uri"] == "/sovd" and captured["retain_gone"] == 600.0
+
+
+def test_sovd_listen_defaults_to_loopback():
+    from zenode.cli import _parse_loopback_listen
+
+    assert _parse_loopback_listen(":7690") == ("127.0.0.1", 7690)
+    assert _parse_loopback_listen("0.0.0.0:7690") == ("0.0.0.0", 7690)

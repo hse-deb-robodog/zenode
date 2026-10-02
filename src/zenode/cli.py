@@ -546,6 +546,60 @@ def cmd_export(args: argparse.Namespace) -> int:
         session.close()
 
 
+# ----------------------------------------------------------------------- sovd
+
+
+def _parse_loopback_listen(value: str) -> tuple[str, int]:
+    """Like :func:`_parse_listen`, but an empty host means loopback.
+
+    The exporter exists to be scraped from elsewhere; the SOVD sidecar serves
+    node identity, measurements and service results to anyone with a browser,
+    so widening past the box is an explicit act.
+    """
+    host, _, port = value.rpartition(":")
+    try:
+        return host or "127.0.0.1", int(port)
+    except ValueError:
+        raise ConfigError(f"--listen: expected [host:]port, got {value!r}") from None
+
+
+def cmd_sovd(args: argparse.Namespace) -> int:
+    """Serve what nodes declare diagnosable over SOVD (ISO 17978), read-only."""
+    # Local: `zenode.sovd.sidecar` imports the latched-subscriber helper from
+    # this module, so a top-level import here would be circular.
+    from . import sovd
+
+    transport = _transport_from_args(args)
+    host, port = _parse_loopback_listen(args.listen)
+    topology = sovd.Topology(
+        transport.namespace,
+        retain_gone=args.retain_gone,
+        max_gone=args.max_gone,
+        log_buffer=args.log_buffer,
+    )
+    session = _open_session(transport)
+    sidecar = sovd.Sidecar(
+        session,
+        transport.namespace,
+        topology=topology,
+        call_timeout=args.call_timeout,
+        max_calls=args.max_calls,
+    )
+    sidecar.start()
+    server = sovd.make_server(sidecar, host, port, base_uri=args.base_uri)
+    print(f"serving namespace {transport.namespace!r} → http://{host}:{port}{args.base_uri}/v1")
+    print("Ctrl-C to stop…")
+    try:
+        server.serve_forever()
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        server.server_close()
+        sidecar.stop()
+        session.close()
+
+
 # ---------------------------------------------------------------------- trace
 
 
@@ -844,6 +898,57 @@ def main(argv: list[str] | None = None) -> None:
     )
     _add_common(p, contract=False)
     p.set_defaults(fn=cmd_export)
+
+    p = sub.add_parser("sovd", help="serve declared diagnostics over SOVD (ISO 17978), read-only")
+    p.add_argument(
+        "--listen",
+        default="127.0.0.1:7690",
+        metavar="[HOST:]PORT",
+        help="address to serve on (default 127.0.0.1:7690; loopback unless widened)",
+    )
+    p.add_argument(
+        "--base-uri",
+        default="/sovd",
+        metavar="PATH",
+        help="mount path; the API lives under PATH/v1 (default /sovd)",
+    )
+    p.add_argument(
+        "--retain-gone",
+        type=float,
+        default=600.0,
+        metavar="SECONDS",
+        help="keep a departed node listed this long (default 600)",
+    )
+    p.add_argument(
+        "--max-gone",
+        type=int,
+        default=64,
+        metavar="N",
+        help="at most this many departed nodes retained (default 64)",
+    )
+    p.add_argument(
+        "--log-buffer",
+        type=int,
+        default=1000,
+        metavar="N",
+        help="log records kept per node (default 1000)",
+    )
+    p.add_argument(
+        "--max-calls",
+        type=int,
+        default=32,
+        metavar="N",
+        help="in-flight service calls before answering 503 (default 32)",
+    )
+    p.add_argument(
+        "--call-timeout",
+        type=float,
+        default=2.0,
+        metavar="SECONDS",
+        help="per service call; a miss is a 504 (default 2)",
+    )
+    _add_common(p, contract=False)
+    p.set_defaults(fn=cmd_sovd)
 
     p = sub.add_parser("trace", help="show every hop of one trace, across the fleet")
     p.add_argument("trace_id", help="the 32-hex trace id, as it appears in logs")
