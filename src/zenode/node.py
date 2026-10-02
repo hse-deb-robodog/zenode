@@ -282,6 +282,7 @@ class Node:
                 name=self.name,
                 host=self.__transport.host or socket.gethostname(),
                 zenode_version=__version__,
+                health_interval=self.health_interval,
                 state=lambda: self.__state,
                 publishers=self.__publishers,
                 subscriptions=self.__subscriptions,

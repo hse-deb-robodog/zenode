@@ -21,11 +21,11 @@ subscriber receives no cache and would simply never see a descriptor.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from ..topic import resolve_key
+from ..topic import Diagnostic, resolve_key
 
 MeasureKind = Literal["gauge", "counter"]
 """What a measurement's value means over time, in Prometheus/OTel vocabulary:
@@ -69,11 +69,27 @@ class EntityInfo(BaseModel):
 
 
 class ServiceInfo(BaseModel):
-    """One service a node serves."""
+    """One service a node serves, with everything a caller that never imports
+    the contract needs: the shapes, the wire encodings, and whether a
+    diagnostic client may call it."""
 
     key: str
     request: str = ""
     reply: str = ""
+    """Class names, for a human reading a table — see :attr:`EntityInfo.schema_name`."""
+    diagnostic: Diagnostic | None = None
+    """``"read"``, ``"operation"`` or not exposed — :attr:`zenode.Service.diagnostic`."""
+    description: str = ""
+    request_schema: dict[str, Any] = {}
+    reply_schema: dict[str, Any] = {}
+    """``model_json_schema()`` of the two models; ``{}`` for a ``bytes``
+    payload. A few kilobytes per service, once per start on a latched key:
+    cheap, and it is what lets a sidecar validate and document a call without
+    a contract import."""
+    request_encoding: str = ""
+    reply_encoding: str = ""
+    """The zenoh encoding string the codec declares, e.g. ``application/json``.
+    A consumer that passes JSON through needs to know when it cannot."""
 
 
 class MeasureDescriptor(BaseModel):
@@ -114,3 +130,12 @@ class NodeInfo(BaseModel):
     heartbeat whose descriptor has not arrived is not exported: a series whose
     ``TYPE`` flips mid-history is worse than a short hole, and latched delivery
     makes the hole transient."""
+    runtime: list[MeasureDescriptor] = []
+    """The heartbeat's own fields, described the way ``measures`` describes the
+    application's — :data:`zenode.msgs.health.RUNTIME_MEASURES`. On the bus so
+    a consumer in any language reads a heartbeat without a table of its own."""
+    health_interval: float | None = None
+    """Seconds between this node's heartbeats, or ``None`` for a node that
+    publishes none. A consumer cannot tell silence from a slow node without it;
+    with it, three missed beats is the same rule a subscription ``deadline``
+    uses."""

@@ -20,7 +20,8 @@ from pydantic import BaseModel
 from zenode import Service, Topic
 from zenode.declarative import Measurement
 from zenode.metrics import Latency, ProcessStats
-from zenode.msgs import MeasureDescriptor
+from zenode.msgs import Empty, MeasureDescriptor
+from zenode.msgs.health import RUNTIME_MEASURES
 from zenode.reporting import Reporter, ReporterSources, _entity_info
 from zenode.topic import topic_flags
 
@@ -100,6 +101,7 @@ def sources(
         "name": "nav",
         "host": "jetson",
         "zenode_version": "0.0-test",
+        "health_interval": 2.0,
         "state": lambda: "running",
         "publishers": [],
         "subscriptions": [],
@@ -360,3 +362,56 @@ def test_a_wiring_change_republishes_exactly_once():
 
     r.beat()
     assert len(put_info.sent) == 2  # nothing changed, so nothing is republished
+
+
+# ------------------------------------------------------------- descriptor: services
+
+
+GET_POSE = Service(
+    "state/get_pose", request=Empty, reply=Ping, diagnostic="read", description="Where am I."
+)
+
+
+def test_the_descriptor_says_how_a_service_may_be_called():
+    r = reporter(
+        servers=[
+            _FakeServer(GET_POSE, "robodog/state/get_pose"),
+            _FakeServer(SUM, "robodog/svc/sum"),
+        ]
+    )
+    by_key = {s.key: s for s in r.build_info().serves}
+    assert by_key["robodog/state/get_pose"].diagnostic == "read"
+    assert by_key["robodog/state/get_pose"].description == "Where am I."
+    assert by_key["robodog/svc/sum"].diagnostic is None
+
+
+def test_the_descriptor_carries_both_schemas():
+    """A consumer that never imports the contract still knows the shapes."""
+    r = reporter(servers=[_FakeServer(SUM, "robodog/svc/sum")])
+    (info,) = r.build_info().serves
+    assert info.request_schema == Ping.model_json_schema()
+    assert info.reply_schema == Ping.model_json_schema()
+    assert info.request_encoding == "application/json"
+    assert info.reply_encoding == "application/json"
+
+
+def test_a_raw_service_has_no_schema_but_names_its_encoding():
+    raw = Service("svc/blob", request=bytes, reply=bytes)
+    r = reporter(servers=[_FakeServer(raw, "robodog/svc/blob")])
+    (info,) = r.build_info().serves
+    assert info.request_schema == {}
+    assert info.request_encoding == "application/octet-stream"
+
+
+# -------------------------------------------------------- descriptor: runtime catalog
+
+
+def test_the_descriptor_carries_the_runtime_catalog():
+    """Every heartbeat field is described on the bus, like `measures` already is."""
+    info = reporter().build_info()
+    assert info.runtime == list(RUNTIME_MEASURES)
+
+
+def test_the_descriptor_carries_the_health_interval():
+    assert reporter(health_interval=2.0).build_info().health_interval == 2.0
+    assert reporter(health_interval=None).build_info().health_interval is None

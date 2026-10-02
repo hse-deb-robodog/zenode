@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .metrics import Latency, ProcessStats, summarize
-from .msgs.health import NodeHealth, NodeState
+from .msgs.health import RUNTIME_MEASURES, NodeHealth, NodeState
 from .msgs.info import EntityInfo, NodeInfo, ServiceInfo
 from .topic import Service, Topic, topic_flags
 
@@ -41,6 +41,27 @@ if TYPE_CHECKING:
 def _entity_info(topic: Topic[Any], key: str) -> EntityInfo:
     """One publisher or subscription, as it appears on the descriptor."""
     return EntityInfo(key=key, schema_name=topic.schema.__name__, flags=topic_flags(topic))
+
+
+def _json_schema(model: type[Any]) -> dict[str, Any]:
+    """``model_json_schema()`` where there is one; ``{}`` for ``bytes``."""
+    schema = getattr(model, "model_json_schema", None)
+    return schema() if callable(schema) else {}
+
+
+def _service_info(service: Service[Any, Any], key: str) -> ServiceInfo:
+    """One served service, as it appears on the descriptor."""
+    return ServiceInfo(
+        key=key,
+        request=service.request.__name__,
+        reply=service.reply.__name__,
+        diagnostic=service.diagnostic,
+        description=service.description,
+        request_schema=_json_schema(service.request),
+        reply_schema=_json_schema(service.reply),
+        request_encoding=str(service.request_codec.encoding),
+        reply_encoding=str(service.reply_codec.encoding),
+    )
 
 
 class PublisherLike(Protocol):
@@ -102,6 +123,8 @@ class ReporterSources:
     name: str
     host: str
     zenode_version: str
+    health_interval: float | None
+    """Published on the descriptor so a consumer can judge silence."""
     state: Callable[[], NodeState]
     publishers: Sequence[PublisherLike]
     subscriptions: Sequence[SubscriptionLike]
@@ -245,15 +268,10 @@ class Reporter:
             zenode=s.zenode_version,
             publishes=[_entity_info(p.topic, p.key) for p in s.publishers],
             subscribes=[_entity_info(sub.topic, sub.key) for sub in s.subscriptions],
-            serves=[
-                ServiceInfo(
-                    key=server.key,
-                    request=server.service.request.__name__,
-                    reply=server.service.reply.__name__,
-                )
-                for server in s.servers
-            ],
+            serves=[_service_info(server.service, server.key) for server in s.servers],
             measures=[m.descriptor for m in s.metrics.values()],
+            runtime=list(RUNTIME_MEASURES),
+            health_interval=s.health_interval,
         )
 
     def _sample(self) -> dict[str, float]:
