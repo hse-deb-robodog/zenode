@@ -82,7 +82,7 @@ logic; use the harness when the thing under test *is* the message flow.
 
 Two rules avoid almost all flakiness.
 
-**Await the thing you are asserting on, not a sleep.** `Collector.next()` has a
+Await the thing you are asserting on, not a sleep. `Collector.next()` has a
 timeout and fails loudly.
 
 ```python
@@ -91,9 +91,9 @@ await asyncio.sleep(0.5)             # no
 assert commands.items
 ```
 
-**A collector receiving a message says nothing about other subscribers.**
-Nodes subscribe independently, so `next()` returning does not mean a node under
-test has handled anything. Poll for the state you care about:
+A collector receiving a message says nothing about other subscribers. Nodes
+subscribe independently, so `next()` returning does not mean a node under test
+has handled anything. Poll for the state you care about:
 
 ```python
 async def wait_for(predicate, timeout=2.0):
@@ -114,8 +114,8 @@ common source of flaky tests.
 ## Namespaces
 
 `harness(namespace="test")` scopes every key, which isolates a test run from
-anything else on the machine — including a real robot on the same LAN, since
-multicast is disabled in the harness but a router may not be.
+anything else on the machine, including a real robot on the same LAN, since the
+harness disables multicast but a router may not.
 
 ## Markers
 
@@ -152,5 +152,5 @@ def test_command_topics_expire():
             assert topic.max_age is not None
 ```
 
-Pass your own module prefix — the registry is process-global and will contain
+Pass your own module prefix: the registry is process-global and will contain
 zenode's own topics as well as yours.

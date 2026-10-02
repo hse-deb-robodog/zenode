@@ -25,7 +25,7 @@ design/opensovd-adapter
 
 zenode is a typed node framework for distributed robot systems on
 [Eclipse Zenoh](https://zenoh.io). Independent processes ("nodes") are coupled
-only through a **typed topic contract**; the runtime handles session bootstrap,
+only through a typed topic contract. The runtime handles session bootstrap,
 thread-to-asyncio dispatch, configuration, presence, health and shutdown.
 
 There is no launch system, no IDL and no coordinator. Processes are started
@@ -61,7 +61,7 @@ pip install 'zenode[otel]'      # OpenTelemetry spans
 ## A first node
 
 Two processes exchanging one typed message. Put the contract somewhere both can
-import — it is the only thing they share.
+import. It is the only thing they share.
 
 ```python
 # contract.py
@@ -118,7 +118,8 @@ python sensor.py     # in one terminal
 python monitor.py    # in another
 ```
 
-They discover each other over multicast; no configuration is needed on a LAN.
+They discover each other over multicast, so no configuration is needed on a
+LAN.
 
 ## Runnable examples
 
@@ -136,7 +137,7 @@ repository contains complete programs, each runnable as-is:
 - Handlers never run on zenoh threads. Callbacks copy bytes out and hand them
   to the event loop, so there is one concurrency model.
 - A malformed payload or a raising handler never kills a node. Errors are
-  logged and counted; the subscription continues.
+  logged and counted, and the subscription continues.
 - Backpressure is explicit: `mode="queue"` drops the oldest sample when full,
   `mode="latest"` keeps only the newest. Drops are counted.
 - `on_stop` runs whenever `on_start` was entered, including when it raised
@@ -145,15 +146,15 @@ repository contains complete programs, each runnable as-is:
 
 ## Where to go next
 
-Read [Contracts](contracts.md) first — it is the part two processes must agree
-on. [Nodes](nodes.md) covers everything a single process does.
+Read [Contracts](contracts.md) first, since it is the part two processes must
+agree on. [Nodes](nodes.md) covers everything a single process does.
 
 ## Design notes
 
-Where a design was taken, the note is kept for its trade-offs and its rejected
-alternatives — the reasoning the code no longer states. Where it was not, the
-note records a proposal, so the decision can still be taken deliberately or
-dropped on purpose. The status line at the top of each says which it is.
+Where a design was taken, the note keeps its trade-offs and rejected
+alternatives, the reasoning the code no longer states. Where it was not, the
+note records a proposal, so the decision can still be taken or dropped on
+purpose. The status line at the top of each says which it is.
 
 | Note | Status | Question it answers |
 |---|---|---|

@@ -1,14 +1,14 @@
 # zenode conventions
 
-Units, coordinate frames, time, and key naming — the part of a distributed
-system that two teams get wrong independently and that no type checker catches,
-because everything is `float`.
+Units, coordinate frames, time, and key naming: the part of a distributed
+system that two teams get wrong independently, and that no type checker
+catches because everything is `float`.
 
 **Status: normative for `zenode.msgs` and for zenode-owned keys; advisory for
 application contracts.** `zenode.msgs` complies today; new messages must.
 
-zenode standardizes *conventions*, not *topic keys* — see §7 for why the second
-one is deliberately absent.
+zenode standardizes conventions, not topic keys. §7 explains why topic keys
+are left out on purpose.
 
 Where a rule matches ROS practice, the REP is cited. ROS compatibility is not a
 goal in itself, but these conventions are proven, and the cost of differing is
@@ -18,7 +18,7 @@ paid at every integration.
 
 ## 1. Units
 
-SI, always, on the wire. No exceptions, including for values a human will read.
+SI units on the wire, always, with no exception for values a human will read.
 
 | Quantity | Unit | |
 |---|---|---|
@@ -37,36 +37,37 @@ SI, always, on the wire. No exceptions, including for values a human will read.
 Follows REP-103, with two additions REP-103 does not cover: Celsius (kelvin is
 correct SI and useless in a robot log) and state-of-charge as a fraction.
 
-**Degrees are a presentation format.** They may appear in config files, CLI
+Degrees are a presentation format. They may appear in config files, CLI
 output, and UIs; they are converted at that boundary and never travel in a
-payload. A field named `*_deg` on a message is a bug — units live in this
+payload. A field named `*_deg` on a message is a bug. Units live in this
 document, not in field names.
 
-**Percent likewise.** `soc: float = 0.87`, not `87`.
+The same goes for percent: `soc: float = 0.87`, not `87`.
 
-**This covers `@metric` measurements**, which travel on a zenode-owned key and
-are therefore normative here too: `@metric("battery_soc", unit="1")` reports
-0.0–1.0, an angle is radians and never named `*_deg`, and the `unit` field is
+This covers `@metric` measurements too, which travel on a zenode-owned key and
+are therefore normative here: `@metric("battery_soc", unit="1")` reports
+0.0 to 1.0, an angle is radians and never named `*_deg`, and the `unit` field is
 where the rule becomes visible to whoever reads the exported series.
 
 ## 2. Coordinate frames
 
-**Right-handed, everywhere.** Positive rotation about an axis is counter-clockwise
+Right-handed, everywhere. Positive rotation about an axis is counter-clockwise
 when looking down that axis toward the origin.
 
-**Body frame: FLU** — x **F**orward, y **L**eft, z **U**p.
-**World frame: ENU** — x **E**ast, y **N**orth, z **U**p.
+Body frame: **FLU**, x **F**orward, y **L**eft, z **U**p.
+World frame: **ENU**, x **E**ast, y **N**orth, z **U**p.
 
 So on a ground robot: driving forward is `+x`, turning left is `+z` angular,
 strafing left is `+y`. This matches REP-103, and it is why `Twist.angular.z` is
-yaw rate and `Pose2D.theta` is yaw — both radians, both counter-clockwise-positive.
+yaw rate and `Pose2D.theta` is yaw, both in radians and both counter-clockwise
+positive.
 
 Aerospace FRD/NED is the other defensible choice and is *not* used here. If you
 integrate a component that speaks NED (many IMUs and flight controllers do),
 convert it in the driver node. The conversion belongs at the hardware boundary,
 not in every consumer.
 
-**Quaternions are xyzw**, in that order, and unit length.
+Quaternions are **xyzw**, in that order, and unit length.
 
 ```python
 Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)  # identity — the default
@@ -77,7 +78,7 @@ much of the aerospace and graphics literature. Both are common, and a mismatch
 produces a rotation that looks *almost* correct. Never accept a quaternion
 whose order you have not checked.
 
-**Producers normalize; consumers may assume normalized.** A non-unit quaternion
+Producers normalize; consumers may assume normalized. A non-unit quaternion
 on the wire is a producer bug. Consumers are not required to re-normalize
 defensively, and messages carry no flag for it.
 
@@ -95,8 +96,8 @@ flowchart LR
 
 | Name | Meaning |
 |---|---|
-| `map` | World-fixed. Discontinuous — jumps when localization corrects. Long-term accurate. |
-| `odom` | World-fixed, **continuous** — never jumps, drifts without bound. |
+| `map` | World-fixed. Discontinuous: jumps when localization corrects. Accurate over the long term. |
+| `odom` | World-fixed and continuous: never jumps, drifts without bound. |
 | `base_link` | Rigidly attached to the robot body, at its rotation centre. |
 | `<sensor>_link` | Rigidly attached to a sensor, e.g. `lidar_link`, `imu_link`. |
 
@@ -105,51 +106,52 @@ The `map`/`odom` split matters most: a control loop must consume `odom`
 error term), while a goal or a map lookup must use `map`. Merging them into one
 "pose" topic is the bug this naming exists to prevent.
 
-zenode ships **no transform tree**. That is inside the scope fence — there is
-no TF, no interpolation, no lookup graph. `Transform` carries `frame_id` and
+zenode ships no transform tree. That is inside the scope fence: no TF, no
+interpolation, no lookup graph. `Transform` carries `frame_id` and
 `child_frame_id` so that a payload states what it is relative to; composing
 transforms is the application's job.
 
 ## 4. Time and provenance
 
-**Rule: time and provenance live in the `Envelope`; spatial frame lives in the
-payload.**
+Time and provenance live in the `Envelope`. The spatial frame lives in the
+payload.
 
 `Envelope` already carries `node` (sender), `seq`, `ts_ns` (publish time), and
-`traceparent`. A message therefore does **not** carry a ROS-style `Header`:
+`traceparent`. A message therefore does not carry a ROS-style `Header`:
 
 - No `stamp` field. Use `Envelope.ts_ns` / `Envelope.age_s()`.
 - No `seq` field. Use `Envelope.seq`.
-- **Do** carry `frame_id` when the payload is spatial — the transport cannot
+- Do carry `frame_id` when the payload is spatial. The transport cannot
   know it.
 
-Two timestamps that can disagree is a debugging trap, and a payload `stamp`
-eventually will — a message constructed once and published twice already does.
-`Transform` is the reference shape for a compliant spatial message.
+Two timestamps that can disagree are a debugging trap, and a payload `stamp`
+eventually will disagree: a message constructed once and published twice
+already does. `Transform` is the reference shape for a compliant spatial
+message.
 
 The exception is a payload whose timestamp is *not* its publish time:
 a measurement captured at t₀ and published at t₁ after processing. Then a
 payload field is correct, and it must be named for what it is
 (`captured_ts_ns`), never `stamp`.
 
-**Two clocks, two purposes:**
+Two clocks, two purposes:
 
 | | Clock | Used by | Breaks when |
 |---|---|---|---|
 | `Envelope.ts_ns`, `age_s()`, `Topic.max_age` | wall (`time.time_ns`) | *Is this message too old to act on?* | hosts are not NTP-synced |
 | Subscription `deadline` | monotonic (`loop.time`) | *Has anything arrived at all?* | never |
 
-Wall clock is unavoidable for cross-host age — a monotonic clock is meaningless
-between machines. Anything measurable locally uses monotonic. See
+Wall clock is unavoidable for cross-host age, because a monotonic clock is
+meaningless between machines. Anything measurable locally uses monotonic. See
 `subscription-deadlines.md`.
 
 ## 5. Key naming
 
 Keys are hierarchical, `/`-separated, lower `snake_case` segments, and
-**relative** — the deployment namespace is prefixed at runtime, so the same
+relative: the deployment namespace is prefixed at runtime, so the same
 contract runs on N robots.
 
-**`node/` is reserved by zenode.** It holds the runtime's own keys and an
+`node/` is reserved by zenode. It holds the runtime's own keys and an
 application must not publish there:
 
 | Key | Owner |
@@ -174,7 +176,7 @@ Node names change when code is refactored; the kind of data does not, and a key
 that encodes its producer forces a wire-breaking rename every time you split a
 node.
 
-Keys owned by an outside system — a vendor driver, another stack — use
+Keys owned by an outside system (a vendor driver, another stack) use
 `Topic.absolute`, which bypasses the namespace:
 
 ```python
@@ -183,10 +185,10 @@ lidar = Topic.absolute("livox/lidar", bytes)  # RawCodec by default
 
 ## 6. What belongs in `zenode.msgs`
 
-Admission criterion: **the type must have a convention worth standardizing.**
-Commonness is not the point; *agreement* is. The reason to centralize a struct
-of three floats is that two teams will independently disagree about its units,
-axis order, or frame semantics.
+The admission criterion: the type must have a convention worth standardizing.
+What matters is agreement, not how common the type is. The reason to
+centralize a struct of three floats is that two teams will independently
+disagree about its units, axis order, or frame semantics.
 
 Applying it:
 
@@ -196,39 +198,40 @@ Applying it:
 | `NodeHealth` | ✅ shipped | zenode's own contract |
 | `Odometry` | candidate | Which frame (§3) is exactly what people get wrong |
 | `Imu` | candidate | Axis order and units are the whole content of REP-145 |
-| `JointState` | candidate | By-name vs by-index ordering is a classic silent bug |
-| `BatteryState` | candidate | SoC as fraction vs percent (§1) is a classic silent bug |
+| `JointState` | candidate | By-name vs by-index ordering fails silently |
+| `BatteryState` | candidate | SoC as fraction vs percent (§1) fails silently |
 | `LaserScan` | ✗ | Beyond "radians and metres" there is nothing to agree on |
 | Images, point clouds | ✗ | `bytes` + `RawCodec`; the codec choice dominates and no convention exists to encode |
-| Robot commands, nav types, mission state | ✗ | Application domain — belongs in its own contract, where it evolves with the robot |
+| Robot commands, nav types, mission state | ✗ | Application domain. Belongs in its own contract, where it evolves with the robot |
 
 Additional rules for anything admitted:
 
-- **No `Header`** (§4).
-- **No covariance** until a real consumer needs it. It triples the model and
+- No `Header` (§4).
+- No covariance until a real consumer needs it. It triples the model, and
   JSON-serialising 36 floats per odometry message is measurable bandwidth.
-- **Every field defaulted**, so a partially-known message is constructible —
-  the existing messages all do this.
-- **Compliance asserted in the module docstring**, as `geometry.py` does:
+- Every field defaulted, so a partially known message is constructible. The
+  existing messages all do this.
+- Compliance asserted in the module docstring, as `geometry.py` does:
   *"right-handed, SI units, quaternions in xyzw order"*.
 
 ## 7. What zenode deliberately does not standardize
 
-**Topic keys.** There is no `StandardTopics.cmd_vel`, and there will not be.
+Topic keys are not standardized. There is no `StandardTopics.cmd_vel`, and
+there will not be.
 
 A `Topic` binds key + schema + codec + `latched` + `max_age` + `trace`. Only the
-schema is universal; the rest is deployment policy — `max_age=0.5` on a velocity
+schema is universal; the rest is deployment policy. `max_age=0.5` on a velocity
 command is wrong for both a slow tracked vehicle and a drone.
 
-The key string in particular is the worst field to freeze. Changing a shipped
-key breaks the wire **silently**: no exception, no type error, just two nodes
-that never hear each other. And a half-adopted standard misleads more than none.
+The key string is the worst field to freeze. Changing a shipped key breaks the
+wire silently: no exception, no type error, just two nodes that never hear each
+other. A half-adopted standard misleads more than none.
 
 ROS is the precedent: it ships `geometry_msgs/Twist` and has never shipped a
 typed constant for `/cmd_vel`. Its interop value comes from REP-103 and
-REP-105 — documents like this one — plus remapping at launch.
+REP-105 (documents like this one) plus remapping at launch.
 
-**The consequence for reusable nodes:** a node meant to run on more than one
+The consequence for reusable nodes: a node meant to run on more than one
 robot takes its `Topic` as a constructor argument rather than importing a
 global.
 
@@ -254,14 +257,14 @@ else's `max_age`.
 
 ## 8. Changing a convention
 
-Units, handedness, and quaternion order are **wire-breaking and silent** — a
+Units, handedness, and quaternion order are wire-breaking and silent: a
 consumer reading the old convention gets plausible numbers, not an error. So:
 
 1. Do not change one to fix a single integration. Convert at that boundary.
 2. If a change is genuinely warranted, it needs a message-level rename
    (`PoseV2`, or a new key), never an in-place redefinition. A field that means
    something different in 0.3 than in 0.2, under the same name, is undebuggable.
-3. Key-naming and `zenode.msgs` admission (§5, §6) are soft — they can be
+3. Key-naming and `zenode.msgs` admission (§5, §6) are soft and can be
    revised in a release note.
 
 ## Checklist
@@ -281,4 +284,4 @@ For a new topic in an application contract:
 - [ ] Relative key, `snake_case`, grouped by kind not by producer (§5)
 - [ ] Not under `node/`
 - [ ] `latched=True` for state a late joiner must see
-- [ ] `max_age` only where a stale message is *wrong* — and only with synced clocks (§4)
+- [ ] `max_age` only where a stale message is *wrong*, and only with synced clocks (§4)

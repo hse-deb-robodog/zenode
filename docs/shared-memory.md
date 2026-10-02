@@ -62,7 +62,7 @@ FRAME = Topic("camera/rgb", bytes, codec=RawCodec(Encoding.IMAGE_JPEG), shm=True
 shared_memory = true
 ```
 
-Required at **both** ends. A `shm=True` topic published to a peer without it
+Required at both ends. A `shm=True` topic published to a peer without it
 still delivers correctly, through the normal path. The publishing node logs a
 warning when its own transport has it disabled.
 
@@ -113,15 +113,15 @@ in a normal publish of the same payload.
 
 Fallbacks are counted as `NodeHealth.shm_fallbacks` and exported as
 `zenode_node_shm_fallbacks_total`. A sustained non-zero rate means the topic is
-running on the slower path — the failure mode is not an error but a silent loss
-of the speedup, so it is worth an alert.
+running on the slower path. Nothing errors and the speedup is simply lost, so
+it is worth an alert.
 
 Warnings are rate-limited to one per 30 seconds, so a persistent failure does
 not produce a log line per frame.
 
 ### It is not zero-copy
 
-zenoh's Python objects — `ZShmMut`, `ZShm`, and `ZBytes` — expose `__bytes__`
+zenoh's Python objects (`ZShmMut`, `ZShm`, and `ZBytes`) expose `__bytes__`
 but not the buffer protocol, verified on 1.9.0. `memoryview()` raises on all
 three, on both the write and the read side.
 
@@ -196,25 +196,25 @@ buffer[0:n] = payload
 publisher.put(buffer)
 ```
 
-Two details are load-bearing:
+Two details matter:
 
 - **The default allocation policy never reclaims.** `JustAlloc` fills a pool
-  after a handful of frames, after which every allocation fails — and because
-  the fallback is a normal publish, it fails invisibly. `GarbageCollect` wrapping
+  after a handful of frames, after which every allocation fails, and because
+  the fallback is a normal publish it fails invisibly. `GarbageCollect` wrapping
   `Defragment` is what keeps a 30 Hz camera allocating indefinitely.
 - **The provider must be created before the session** when `RLIMIT_MEMLOCK` is
   tight, because both draw on the same budget. zenode creates the pool lazily,
-  which is why raising the limit is documented as a prerequisite rather than a
+  which is why raising the limit is documented as a prerequisite and not a
   suggestion.
 
 ## Failure handling
 
 `ShmPool` catches `BaseException`, re-raising only `KeyboardInterrupt` and
-`SystemExit`. This is deliberate: zenoh's allocation path can panic out of Rust
-as `pyo3_runtime.PanicException`, which derives from `BaseException` rather than
+`SystemExit`, because zenoh's allocation path can panic out of Rust as
+`pyo3_runtime.PanicException`, which derives from `BaseException` rather than
 `Exception`. An ordinary `except Exception` would let that terminate the
-publishing thread — for a camera node, on a condition that is recoverable by
-publishing normally.
+publishing thread, and for a camera node that would happen on a condition that
+is recoverable by publishing normally.
 
 A provider that fails to build is marked unavailable and never retried.
 Retrying per frame would cost more than the copy shared memory was avoiding.
@@ -222,8 +222,8 @@ Retrying per frame would cost more than the copy shared memory was avoiding.
 ## Typing
 
 `zenoh.shm` is imported through an untyped module handle rather than a direct
-import. zenoh 1.9.0 ships stubs that disagree with the compiled module —
-`MemoryLayout` declares an `alignment` parameter the runtime rejects — and marks
+import. zenoh 1.9.0 ships stubs that disagree with the compiled module
+(`MemoryLayout` declares an `alignment` parameter the runtime rejects) and marks
 the whole surface `@_unstable`. Treating it as `Any` keeps a wrong stub from
 becoming a build error, and suits an API that may change.
 

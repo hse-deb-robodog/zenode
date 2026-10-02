@@ -2,14 +2,14 @@
 
 **Typed node framework for distributed robot systems on [Eclipse Zenoh](https://zenoh.io).**
 
-zenode is the thin layer between "raw zenoh" and "a whole robotics framework":
-independent processes ("nodes"), coupled only through a **typed topic
-contract**, with the runtime plumbing — session bootstrap, thread→asyncio
-dispatch, config, presence, health, graceful shutdown — done once, correctly.
+zenode is the thin layer between raw zenoh and a whole robotics framework.
+Independent processes ("nodes") are coupled only through a typed topic
+contract, and the runtime plumbing (session bootstrap, thread-to-asyncio
+dispatch, config, presence, health, graceful shutdown) is done once.
 
-It deliberately is **not** a ROS or dora replacement: no launch system, no IDL,
-no coordinator. You start processes however you like (shell, process-compose,
-docker); they find each other over zenoh.
+It is not a ROS or dora replacement: there is no launch system, no IDL and no
+coordinator. You start processes however you like (shell, process-compose,
+docker) and they find each other over zenoh.
 
 
 ## Documentation
@@ -32,8 +32,9 @@ Rendered docs, including the full API reference:
 ## The contract
 
 A `Topic` binds key, payload type, wire codec, and delivery semantics in one
-declaration. Both sides derive their behavior from it — a mismatch is a type
-error at the call site, not a runtime parse failure in another process.
+declaration. Both sides derive their behavior from it, so a mismatch shows up
+as a type error at the call site instead of a runtime parse failure in another
+process.
 
 ```python
 from pydantic import BaseModel
@@ -98,12 +99,12 @@ def cli() -> None:
     run(Nav)  # config, logging, session, signals, presence, health, exit codes
 ```
 
-Wiring is declarative: `publish()` descriptors materialize before `on_start`
-(so it may use them), decorated bindings activate right after it (so handlers
-never see a half-initialized node), and a subclass overriding a decorated
-method without re-decorating inherits the binding. The imperative API
+Wiring is declarative. `publish()` descriptors materialize before `on_start`,
+so it may use them. Decorated bindings activate right after it, so handlers
+never see a half-initialized node. A subclass that overrides a decorated method
+without re-decorating inherits the binding. The imperative API
 (`self.subscribe(...)`, `self.publisher(...)` inside `on_start`) remains the
-escape hatch for wiring only known at runtime — and the decorators just stamp
+escape hatch for wiring only known at runtime. The decorators only stamp
 metadata, so handlers stay directly callable in tests.
 
 ## Try the example
@@ -121,30 +122,30 @@ The example uses an explicit localhost endpoint (the talker listens on
 
 ### If nodes don't find each other
 
-Zenoh's zero-config discovery uses **UDP multicast** (port 7446), which
-firewalls commonly block — `ufw`/`firewalld` on Linux do by default. A node that
+Zenoh's zero-config discovery uses UDP multicast on port 7446, which firewalls
+commonly block. `ufw` and `firewalld` on Linux block it by default. A node that
 cannot find its peers says so itself (`WARN … Scouting delay elapsed before
-start conditions are met`); `uv run zenode doctor` confirms it, with a
-*multicast scouting* check that tells you whether discovery works on your host.
-Your options, any one of which is enough:
+start conditions are met`). `uv run zenode doctor` confirms it with a
+multicast scouting check that tells you whether discovery works on your host.
+Any one of these is enough:
 
 1. Allow multicast scouting through the firewall (e.g. `sudo ufw allow 7446/udp`).
 2. Skip discovery: set explicit `[transport] listen`/`connect` endpoints
    (what the examples do).
-3. Run a `zenohd` router and use `mode = "client"` — the recommended setup
-   for real deployments anyway.
+3. Run a `zenohd` router and use `mode = "client"`, which is the recommended
+   setup for real deployments anyway.
 
 ## Observability, in one paragraph
 
 Every node emits structured logs with a trace id, a health heartbeat carrying
 the four golden signals plus CPU and memory, and a W3C trace context on every
-message. `zenode logs --trace <id>` follows one message across the fleet;
+message. `zenode logs --trace <id>` follows one message across the fleet, and
 `zenode trace <id>` reconstructs its path with no collector deployed. One
 sidecar, `zenode export`, forwards all of it to Prometheus, Loki or any OTLP
 endpoint. Spans are optional and cost nothing until you install
 `zenode[otel]`.
 
-Full detail: **[docs/open-telemetry.md](docs/open-telemetry.md)**.
+Full detail is in [docs/open-telemetry.md](docs/open-telemetry.md).
 
 ## Large payloads
 
@@ -152,25 +153,24 @@ Full detail: **[docs/open-telemetry.md](docs/open-telemetry.md)**.
 at 30 Hz, a 1080p RGB frame costs 1.91 ms to publish normally and 0.28 ms
 through shared memory.
 
-Full detail: **[docs/shared-memory.md](docs/shared-memory.md)**.
+Full detail is in [docs/shared-memory.md](docs/shared-memory.md).
 
 ## Design notes
 
-- **Zenoh is the transport, not an implementation detail to hedge against.**
-  The public API hides zenoh types for ergonomics and testability, but zenode
-  does not promise middleware portability — that trade buys liveliness,
-  queryables, attachments, and zenoh-ext late-joiner recovery as first-class
-  features.
+- Zenoh is the transport, not an implementation detail to hedge against. The
+  public API hides zenoh types for ergonomics and testability, but zenode does
+  not promise middleware portability. That trade buys liveliness, queryables,
+  attachments, and zenoh-ext late-joiner recovery.
 - Latched topics use zenoh-ext advanced pub/sub (cache + history query +
   publisher detection). This requires HLC timestamping, which zenode enables
   on every session (`[transport] timestamping`, default on).
 - `max_age` staleness checks compare sender timestamps against local time, so
-  a host whose clock is off by more than `max_age` has *everything* it sends
-  dropped. Synchronize clocks (chrony/NTP); the subscriber warns and counts
-  (`stale`) rather than dropping silently. It is checked twice — on arrival and
-  again at dequeue — and each stage names its own cause, because a sample that
-  is old on arrival means the *sender's* clock is off while one that aged in
-  the queue means *this node* is behind.
+  a host whose clock is off by more than `max_age` has everything it sends
+  dropped. Synchronize clocks (chrony/NTP). The subscriber warns and counts
+  drops as `stale` instead of dropping silently. The check runs twice, on
+  arrival and again at dequeue, and each stage names its own cause: a sample
+  that is old on arrival means the sender's clock is off, while one that aged
+  in the queue means this node is behind.
 - `deadline` needs no synchronized clocks: it is measured on the monotonic loop
   clock, so it is the tool for "did my commander stop talking to me?" on a
   deployment where `max_age` is not usable.

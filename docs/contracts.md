@@ -6,7 +6,7 @@ delivery semantics.
 ## Overview
 
 A `Topic` binds four things in one declaration: the key, the payload type, the
-wire format, and the delivery semantics. Both the publisher and the subscriber
+wire format, and the delivery semantics. The publisher and the subscriber both
 derive their behaviour from the same object, so a mismatch is a type error at
 the call site rather than a parse failure in another process.
 
@@ -27,9 +27,9 @@ CMD = Topic("command/cmd_vel", Twist, max_age=0.5)
 | `latched` | `False` | Late joiners receive the last published value. |
 | `history` | `1` | Samples retained for a latched topic. |
 | `max_age` | `None` | Subscribers drop samples older than this many seconds. |
-| `trace` | `False` | Publishing starts a trace — see [Observability](open-telemetry.md). |
+| `trace` | `False` | Publishing starts a trace. See [Observability](open-telemetry.md). |
 | `trace_ratio` | `1.0` | Fraction of traces started here that are recorded. |
-| `shm` | `False` | Publish through shared memory — see [Shared memory](shared-memory.md). |
+| `shm` | `False` | Publish through shared memory. See [Shared memory](shared-memory.md). |
 | `priority` | `"data"` | Transmission priority band on a congested link. |
 | `congestion_control` | `"drop"` | `"drop"` or `"block"` when the transmit queue is full. |
 | `express` | `False` | Send immediately instead of batching. |
@@ -37,7 +37,7 @@ CMD = Topic("command/cmd_vel", Twist, max_age=0.5)
 
 Invalid combinations raise `ContractError` at import time rather than failing
 at runtime: an empty or whitespace-containing key, a non-positive `max_age`, a
-`history` below 1, a `trace_ratio` outside 0–1, a `trace_ratio` on a topic
+`history` below 1, a `trace_ratio` outside 0 to 1, a `trace_ratio` on a topic
 that is not a trace root, or an unknown `priority`/`congestion_control`.
 
 ### Keys and namespaces
@@ -60,9 +60,9 @@ LIDAR = Topic.absolute("livox/lidar", PointCloud)
 ### Delivery semantics
 
 **`latched`** keeps the last value available to subscribers that join later.
-Use it for state that is occasionally updated and always needed — a battery
-level, a map version, a mode. It requires HLC timestamping, which zenode
-enables by default.
+Use it for state that changes occasionally and is always needed, such as a
+battery level, a map version, or a mode. It requires HLC timestamping, which
+zenode enables by default.
 
 **`max_age`** drops samples older than a threshold. It compares the *sender's*
 wall clock against the receiver's, so it requires synchronised clocks
@@ -77,8 +77,8 @@ declared on the subscription rather than the topic.
 ### Quality of service
 
 The three QoS parameters are fixed when the publisher is declared and apply to
-every message on the topic. They only matter once a link is actually congested;
-on an idle link all three are invisible.
+every message on the topic. They only matter once a link is actually congested.
+On an idle link all three are invisible.
 
 **`priority`** picks a transmission band. Highest to lowest: `real_time`,
 `interactive_high`, `interactive_low`, `data_high`, `data` (the default),
@@ -94,26 +94,27 @@ CAMERA = Topic("camera/rgb", bytes, codec=RawCodec(Encoding.IMAGE_JPEG),
 Only the *relative* order matters: raising every topic to `real_time` changes
 nothing. Reserve the higher bands for the topics that must outrank the rest.
 
-zenode's own runtime traffic is already placed below application data: the
+zenode's own runtime traffic is already placed below application data. The
 health heartbeat publishes at `data_low` and the log stream at `background`, so
 a node that starts logging hard cannot push control messages off the link.
 
 **`congestion_control`** decides what happens when the transmit queue is full.
 The default `"drop"` discards the message, which is what you want for a stream
-where the next sample supersedes this one — a pose at 30 Hz, a camera frame.
-`"block"` waits for the queue to drain instead, for low-rate topics where a
-lost message is a fault rather than a skipped frame.
+where the next sample supersedes this one, such as a pose at 30 Hz or a camera
+frame. `"block"` waits for the queue to drain instead, for low-rate topics
+where a lost message is a fault rather than a skipped frame.
 
 > `"block"` blocks the calling thread, and `put()` normally runs on the node's
-> event loop — so a stalled link stalls every timer, handler and signal handler
-> in the process, the same failure mode [`Node.blocking`](nodes.md) exists to
-> avoid. Use it on low-rate topics, and not from a handler that has to keep
+> event loop. A stalled link therefore stalls every timer, handler and signal
+> handler in the process, the same failure [`Node.blocking`](nodes.md) exists
+> to avoid. Use it on low-rate topics, and not from a handler that has to keep
 > running regardless.
 
 **`express`** sends each message on its own instead of batching it with
 whatever else is queued, trading throughput for a little latency. It is worth
-it for small, infrequent, latency-critical messages, and counterproductive on a
-high-rate stream, where batching is what keeps the per-message overhead down.
+it for small, infrequent, latency-critical messages. On a high-rate stream it
+is counterproductive, because batching is what keeps the per-message overhead
+down.
 
 `zenode topics` shows all three as flags when they differ from the default.
 
@@ -135,10 +136,9 @@ A handler that raises produces a structured error reply, so the caller receives
 a `ServiceError` carrying the message rather than a silent timeout. No server
 produces `ServiceTimeout`.
 
-Services are for questions with answers — fetch a map, query a parameter, run a
-calibration. They are not a substitute for a topic: a value that changes
-continuously belongs on a topic, where late joiners and backpressure are
-handled.
+Services are for questions with answers: fetch a map, query a parameter, run a
+calibration. A value that changes continuously belongs on a topic, where late
+joiners and backpressure are handled.
 
 ## Codecs
 
@@ -154,8 +154,8 @@ generic tools interpret the payload:
 CAMERA = Topic("camera/rgb", bytes, codec=RawCodec(Encoding.IMAGE_JPEG))
 ```
 
-Payloads stay plain JSON or plain bytes. zenode's own delivery metadata —
-sender, sequence number, timestamp, trace context — travels in a zenoh
+Payloads stay plain JSON or plain bytes. zenode's own delivery metadata
+(sender, sequence number, timestamp, trace context) travels in a zenoh
 *attachment* alongside, so any zenoh tool can read the payload without knowing
 about zenode.
 
@@ -183,12 +183,12 @@ for entry, topic in registered_topics("my_robot.contract"):
 The registry is process-global, so a process importing two contracts sees both.
 Pass an owner prefix to filter to your own.
 
-Topics do not have to live in a `TopicSet` — a plain module-level `Topic` works
+Topics do not have to live in a `TopicSet`. A plain module-level `Topic` works
 everywhere except the registry-driven tooling.
 
 ## Standard messages
 
-`zenode.msgs` provides a deliberately small set:
+`zenode.msgs` is small by design:
 
 | Module | Contents |
 |---|---|
