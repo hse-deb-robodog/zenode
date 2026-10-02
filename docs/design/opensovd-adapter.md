@@ -2,7 +2,9 @@
 
 **Status: proposal. Not implemented, and no decision taken.** This page records
 what SOVD is, what an adapter would look like, and what it would cost, so the
-question can be answered on evidence. Drafted 2026-08-26.
+question can be answered on evidence. Drafted 2026-08-26; §5, §11 and §13
+revised 2026-09-21 after the
+[storage research note](zenoh-storage-for-sovd.md).
 
 The short version: it is possible, and it makes sense as an **out-of-process
 sidecar that serves what nodes declare** — services for reads and actions, the
@@ -117,9 +119,21 @@ to be working for them to answer:
 2. **Read-only services** — computed on request by the node.
 3. **Operations** — the remaining services, which may act.
 
-Topics are not a source. A node that wants its pose diagnosable subscribes with
-`mode="latest"`, keeps the value in a field, and declares a read-only service
-that returns it — three lines, and a deliberate act.
+Topics are not a source in Phase 1. A node that wants its pose diagnosable
+subscribes with `mode="latest"`, keeps the value in a field, and declares a
+read-only service that returns it — three lines, and a deliberate act.
+
+There is one topic read that would not break the principle, and it is recorded
+here so it is not rediscovered. A `latched=True` topic is published through a
+zenoh-ext `AdvancedPublisher` whose cache is an ordinary queryable, so a
+one-shot query returns its last sample — `Envelope` included — with no
+subscription and no state in the sidecar. If topic reads are ever wanted, that
+is the shape: **latched topics the contract explicitly marks diagnosable**, as
+a fourth source between the heartbeat and services. It needs its own flag on
+`Topic`; `latched` means "late joiners get the last value", and giving it a
+second meaning would make every state topic externally visible by accident.
+§13 has the reasoning, the
+[research note](zenoh-storage-for-sovd.md) the evidence.
 
 ## 6. The one contract change it needs
 
@@ -310,6 +324,12 @@ stale cached value — but it means the passive path carries the diagnostic load
 in exactly the failure it is most needed for. That is the argument for
 [declared measurements](node-measures.md) riding on the heartbeat.
 
+The latched-topic read sketched in §5 would sit in the same gap. The
+publisher's cache is answered by zenoh's own threads and never enters Python,
+so it still replies — with the sample's real send time — while the node's loop
+is wedged, and returns nothing at all once the process is gone. A router
+storage, by contrast, goes on answering for a node that died on Tuesday.
+
 **Conformance claims.** Implementing against `opensovd-models` rather than the
 standard means the defensible phrasing is "a SOVD-compatible subset, validated
 against the OpenSOVD conformance traversal" — never "SOVD compliant".
@@ -336,12 +356,41 @@ service for it, which puts the decision in the contract where it belongs.
 
 ## 13. Rejected alternatives
 
-**Serving topic last-values as data resources.** The first shape this design
-took. It needs a last-value cache in the sidecar, a staleness policy, a
-subscription per exposed topic, and either `latched=True` everywhere or a new
-`Node.latest()` one-shot history query. All of that exists to paper over the
-fact that a topic is a push and a REST read is a pull. Services are a pull
-already. It also scrapes rather than declares — see §5.
+**Serving topic last-values from a cache in the sidecar.** The first shape this
+design took: a subscription per exposed topic, a last-value cache, and a
+staleness policy to go with it. All of that exists to paper over the fact that
+a topic is a push and a REST read is a pull. Services are a pull already. And
+nothing forces such a cache to be contract-driven, so it drifts toward scraping
+— see §5.
+
+An earlier draft also charged this alternative with needing "`latched=True`
+everywhere or a new `Node.latest()` one-shot history query". That part was
+wrong. The one-shot query already exists for latched topics: the zenoh-ext
+publisher cache is a queryable, and a third party can read the last sample
+from it, attachment intact, without a subscription or a cache of its own. So
+the cost objection does not apply to latched topics; the *declared, not
+scraped* objection still does, which is why §5 admits them only behind an
+explicit flag, and not in Phase 1. Two caveats if that day comes: all of
+zenoh-ext's advanced pub/sub is marked unstable, and the adapter must report
+the envelope's send time — and honour `Topic.max_age` where set — or §9's "no
+third state" stops being true. `cli._declare_latched_subscriber` is the
+supported way to reach the cache; the raw `<key>/@adv/**` selector is faster
+and synchronous but couples zenode to an undocumented key layout.
+
+**Reading topics back from a zenoh router storage.** `zenohd`'s storage-manager
+plugin keeps the latest sample per key and answers `session.get()`, so the
+sidecar would need no cache and no subscriptions. Rejected on four counts, the
+first of which is sufficient. A storage keeps payload, encoding and timestamp
+and **drops the attachment**, which is where zenode carries the `Envelope` — a
+sample read back has no sender, no sequence number, no send time, and
+`max_age` is silently skipped. Only `zenohd` can host the plugin; the
+`eclipse-zenoh` wheel cannot load it, so every robot would need a router plus a
+version-locked `.so`, and none of it could run in `harness()`. A storage has no
+expiry, so it answers identically for a live node, a wedged one and one that
+was uninstalled last week. And what is exposed would be declared in a router
+config file the contract cannot see. A deployment is free to run a storage for
+its own reasons; the adapter does not read from one. Evidence and experiments
+are in the [research note](zenoh-storage-for-sovd.md).
 
 **Sitting behind the OpenSOVD gateway as a provider.** Not possible: the
 extension point is a Rust trait and the gateway does not federate (§3).

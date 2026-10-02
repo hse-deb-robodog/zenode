@@ -156,7 +156,7 @@ means editing the matching page.
 
 ### Issue tracker
 
-Issues are tracked in GitHub Issues (`hse-deb-algo-athlets/zenode`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues (`hse-deb-robodog/zenode`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
