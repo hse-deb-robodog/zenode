@@ -263,28 +263,29 @@ loop is stuck is not something that can be added later.
 **Importing the node classes in the CLI to read their declarations.** This is
 how `zenode echo --contract` learns types and it does not transfer: a contract
 module imports pydantic and zenode, a node class imports hardware drivers. The
-[SOVD note](opensovd-adapter.md#10-phases) makes the same point about the same
-temptation.
+[SOVD note](opensovd-adapter.md#15-rejected-alternatives) makes the same point
+about the same temptation.
 
 ---
 
 ## 6. Relationship to the other notes
 
-This is the "per-node descriptor on the bus, latched" that
-[the SOVD adapter note](opensovd-adapter.md#10-phases) files under Phase 2, and
-the "full node descriptor" left open at the end of
-[the measurements note](node-measures.md#4-open-questions). Both defer it for
-the same reason — nothing needed it yet.
+This is the "per-node descriptor on the bus, latched" that the first draft of
+[the SOVD adapter note](opensovd-adapter.md#9-architecture) filed under a later
+phase, and the "full node descriptor" left open at the end of
+[the measurements note](node-measures.md#4-open-questions). Both deferred it
+for the same reason — nothing needed it yet.
 
-`zenode topics --live` is what needs it, and it changes the sequencing: the
-descriptor is now justified by a CLI command that is worth building on its own,
-so it can land first and the two notes inherit it. Concretely, the measure
-catalog becomes a `measures: list[MeasureDescriptor]` field on `NodeInfo`
-rather than a second latched topic, and a SOVD sidecar drops `--contract` for
-components and data without waiting for a Phase 2 decision. `read_only` on
-`Service` is still that note's own change; `ServiceInfo` should carry the flag
-once it exists, so the descriptor never becomes the thing that has to be
-revised twice.
+`zenode topics --live` is what needs it, and it changed the sequencing: the
+descriptor is justified by a CLI command that is worth building on its own, so
+it landed first and the two notes inherited it. Concretely, the measure
+catalog became a `measures: list[MeasureDescriptor]` field on `NodeInfo`
+rather than a second latched topic, and the SOVD sidecar discovers services
+from the bus and never takes a `--contract` flag. The adapter note's own
+changes to the descriptor — `diagnostic`, `description` and the two schemas on
+`ServiceInfo`, plus `runtime` and `health_interval` on `NodeInfo` — are listed
+in [its §7](opensovd-adapter.md#7-the-runtime-changes), so the descriptor is
+revised once.
 
 ---
 

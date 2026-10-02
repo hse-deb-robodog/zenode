@@ -344,7 +344,7 @@ applies `Topic.max_age` where the contract sets one. Under (a) it can be kept
 only by switching to the HLC timestamp, which is a second age mechanism next to
 the one the runtime uses everywhere else.
 
-**[§11, a wedged node answers nothing](opensovd-adapter.md#11-risks).** A
+**[§13, a wedged node answers nothing](opensovd-adapter.md#13-risks).** A
 storage answers when the node is wedged, when it has crashed, and after it has
 been uninstalled, identically, until `zenohd` restarts. For a diagnostic client
 a last-known value is legitimate *if labelled*; what is not is an answer that
