@@ -78,8 +78,12 @@ def _wrap(value: Any, schema: dict[str, Any], description: str = "") -> tuple[An
 
 
 def data_items(view: NodeView, namespace: str) -> list[Metadata]:
+    # Listed only when readable: a client that lists then reads must never
+    # meet a 404 for an id the list just promised.
     items: list[Metadata] = [
-        Metadata(id=i, name=i, category=IDENT_DATA, groups=[GROUP_IDENTITY]) for i in _IDENTITY
+        Metadata(id=i, name=i, category=IDENT_DATA, groups=[GROUP_IDENTITY])
+        for i in _IDENTITY
+        if _identity(view, i) is not None
     ]
     if view.health is not None:
         items.extend(
@@ -89,7 +93,9 @@ def data_items(view: NodeView, namespace: str) -> list[Metadata]:
         )
         items.append(Metadata(id="state", name="state", category=SYS_INFO, groups=[GROUP_RUNTIME]))
     items.extend(
-        Metadata(id=i, name=i, category=SYS_INFO, groups=[GROUP_PRESENCE]) for i in _PRESENCE
+        Metadata(id=i, name=i, category=SYS_INFO, groups=[GROUP_PRESENCE])
+        for i in _PRESENCE
+        if i == "x-zenode-presence" or view.last_seen_s is not None
     )
     if view.info is not None and view.health is not None:
         items.extend(

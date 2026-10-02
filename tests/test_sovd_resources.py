@@ -100,6 +100,20 @@ def test_without_a_heartbeat_only_identity_presence_and_services_are_listed():
     view = _view(info=_info(serves=[READ]))
     ids = {m.id for m in data_items(view, "robodog")}
     assert "sent" not in ids and "node" in ids and "x-zenode-presence" in ids
+    assert "x-zenode-last-seen" not in ids  # listed only once it can be read
+
+
+def test_every_listed_item_reads():
+    """The list is a promise; a 404 for a listed id breaks a client's traversal."""
+    for view in (
+        _view(info=_info(serves=[READ])),
+        _view(info=_info(), health=_health(cpu_percent=None), last_seen_s=0.1),
+        _view(health=_health()),
+    ):
+        for item in data_items(view, "robodog"):
+            if item.groups == [GROUP_SVC]:
+                continue
+            assert read_value(view, item.id, "robodog") is not None, item.id
 
 
 def test_values_are_wrapped_like_upstream():
