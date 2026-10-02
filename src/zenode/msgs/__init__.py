@@ -5,6 +5,7 @@ messages (robot commands, navigation types, …) belong to the application's
 own contract package, where they can evolve with the robot.
 """
 
+from .empty import Empty
 from .geometry import Pose, Pose2D, Quaternion, Transform, Twist, Vector3
 from .health import NodeHealth, NodeState, health_key, health_pattern
 from .info import (
@@ -19,6 +20,7 @@ from .info import (
 from .log import LogRecordMsg, log_key, log_pattern
 
 __all__ = [
+    "Empty",
     "EntityInfo",
     "LogRecordMsg",
     "MeasureDescriptor",
