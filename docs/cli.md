@@ -195,6 +195,26 @@ zenode export --otlp-metrics http://localhost:4318 --otlp-logs http://localhost:
 Use the push options where the backend receives rather than scrapes, or where
 the host cannot be reached. Full detail in [Observability](open-telemetry.md).
 
+### `sovd`
+
+A read-only SOVD (ISO 17978) server over what nodes declare diagnosable.
+
+```bash
+zenode sovd --listen 127.0.0.1:7690 --base-uri /sovd
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `--listen [HOST:]PORT` | `127.0.0.1:7690` | Loopback unless widened. |
+| `--base-uri PATH` | `/sovd` | The API lives under `PATH/v1`; `version-info` under `PATH`. |
+| `--retain-gone SECONDS` | `600` | Keep a departed node listed this long. |
+| `--max-gone N` | `64` | Departed nodes retained, oldest dropped first. |
+| `--log-buffer N` | `1000` | Log records kept per node. |
+| `--max-calls N` | `32` | In-flight service calls before answering 503. |
+| `--call-timeout SECONDS` | `2` | Per service call; a miss is a 504. |
+
+See [SOVD](sovd.md) for what is served.
+
 ## Diagnosing
 
 ### `doctor`

@@ -10,6 +10,7 @@ testing
 cli
 conventions
 open-telemetry
+sovd
 shared-memory
 api/index
 ```
@@ -161,5 +162,5 @@ purpose. The status line at the top of each says which it is.
 |---|---|---|
 | [Live topic discovery](design/live-topics.md) | partly built | How to see what is actually on the bus right now, and how it differs from the contract |
 | [Node-defined measurements](design/node-measures.md) | built | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
-| [OpenSOVD adapter](design/opensovd-adapter.md) | decided | How zenode speaks [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics: a read-only Python sidecar over what nodes declare |
+| [OpenSOVD adapter](design/opensovd-adapter.md) | phase 1 built | How zenode speaks [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics: a read-only Python sidecar over what nodes declare |
 | [Reusing `opensovd-core`](design/opensovd-core-reuse.md) | research | Whether the Rust OpenSOVD server could be used instead of writing one, and what that would take |

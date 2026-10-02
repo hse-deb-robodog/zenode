@@ -53,7 +53,7 @@
 
 The checkout lives at `/home/fabian/.cargo/git/checkouts/opensovd-core-7f30599978eede10/26953d9`. Nothing in it dumps schemas, so a throwaway crate in the scratchpad does it once. The crate is not committed; the JSON is.
 
-- [ ] **Step 1: Write the throwaway crate in the scratchpad**
+- [x] **Step 1: Write the throwaway crate in the scratchpad**
 
 ```toml
 # $SCRATCH/dump-schemas/Cargo.toml
@@ -95,7 +95,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 2: Build and run it on stable, writing into the repo**
+- [x] **Step 2: Build and run it on stable, writing into the repo**
 
 ```bash
 cd $SCRATCH/dump-schemas && cargo run --quiet -- /home/fabian/PycharmProjects/zenode/tests/sovd/schemas
@@ -103,7 +103,7 @@ cd $SCRATCH/dump-schemas && cargo run --quiet -- /home/fabian/PycharmProjects/ze
 
 Expected: eight `wrote ….json` lines. If cargo picks up the checkout's nightly pin, the path dependency is outside that workspace so it should not; if it does, `rustup run stable cargo run …`.
 
-- [ ] **Step 3: Record the pin and add the dev dependency**
+- [x] **Step 3: Record the pin and add the dev dependency**
 
 ```bash
 printf 'opensovd-core 26953d97da4335179083aff41ed52a82882886499e7\nschemas generated with schemars 1 from opensovd-models (feature jsonschema)\n' > tests/sovd/PIN
@@ -112,12 +112,12 @@ uv add --group dev "jsonschema>=4.26"
 
 Correct the hash in `PIN` to exactly `26953d97da4335179083aff41ed52a82886499e7` (copy it from `docs/design/opensovd-adapter.md`, do not retype it).
 
-- [ ] **Step 4: Sanity-check one fixture**
+- [x] **Step 4: Sanity-check one fixture**
 
 Run: `uv run python -c "import json; s=json.load(open('tests/sovd/schemas/entities.json')); print(s['\$schema'], s['title'], list(s['properties']))"`
 Expected: `https://json-schema.org/draft/2020-12/schema Items_for_EntityReference ['items']`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/sovd pyproject.toml uv.lock
@@ -135,7 +135,7 @@ git commit -m "test(sovd): pin opensovd-models schemas as fixtures"
 **Interfaces:**
 - Produces: `Wire` base with `to_json() -> bytes` and `schema_of(cls) -> dict`; `Items[T]`, `EntityReference`, `EntityCapabilities`, `Metadata`, `ReadResponse`, `DataCategoryInformation`, `Group`, `VendorInfo`, `SovdInfo`, `VersionInfo`, `GenericError`, `LogItems`; `SOVD_VERSION = "1.1"`; `error_body(code, message, vendor_code=None) -> bytes`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_sovd_model.py
@@ -233,12 +233,12 @@ def test_error_bodies_match_upstreams_two_spellings():
     assert GenericError.model_fields["error_code"].annotation is str
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_sovd_model.py -q`
 Expected: `ModuleNotFoundError: No module named 'zenode.sovd'`
 
-- [ ] **Step 3: Write the package init and the models**
+- [x] **Step 3: Write the package init and the models**
 
 ```python
 # src/zenode/sovd/__init__.py
@@ -403,12 +403,12 @@ def dumps(value: Any) -> bytes:
     return json.dumps(value).encode()
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_sovd_model.py -q`
 Expected: 8 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/sovd tests/test_sovd_model.py
@@ -426,7 +426,7 @@ git commit -m "feat(sovd): wire shapes pinned to opensovd-models"
 **Interfaces:**
 - Produces: `Presence = Literal["live", "silent", "gone"]`; `NodeView` (frozen: `name`, `presence`, `info: NodeInfo | None`, `health: NodeHealth | None`, `last_seen_s: float | None`, `logs: list[LogRecordMsg]`); `Topology(namespace, *, retain_gone=600.0, max_gone=64, log_buffer=1000, clock=time.monotonic)` with `presence(name, alive)`, `offer_info(bytes)`, `offer_health(bytes)`, `offer_log(bytes)`, `names() -> list[str]`, `get(name) -> NodeView | None`. `SILENT_AFTER_BEATS = 3`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_sovd_topology.py
@@ -570,12 +570,12 @@ def test_views_are_snapshots(clock):
     assert view.logs == []
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_sovd_topology.py -q`
 Expected: `ImportError` on `zenode.sovd.topology`
 
-- [ ] **Step 3: Write the topology**
+- [x] **Step 3: Write the topology**
 
 ```python
 # src/zenode/sovd/topology.py
@@ -761,12 +761,12 @@ class Topology:
                 del self._records[record.name]
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_sovd_topology.py -q`
 Expected: 10 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/sovd/topology.py tests/test_sovd_topology.py
@@ -795,7 +795,7 @@ Mapping, from the spec's §8 with one refinement: identity (`node`, `host`, `zen
 | `currentData` | `app` | each `NodeInfo.measures` id | `{"value": <float>}` from `health.measures`; absent this beat means absent |
 | `currentData` | `svc` | `service_id(key)` for each `diagnostic="read"` JSON service | the reply, served by the router through the call bridge |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_sovd_resources.py
@@ -922,12 +922,12 @@ def test_categories_and_groups_follow_the_items():
     ]
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_sovd_resources.py -q`
 Expected: `ImportError`
 
-- [ ] **Step 3: Write the resources module**
+- [x] **Step 3: Write the resources module**
 
 ```python
 # src/zenode/sovd/resources.py
@@ -1099,12 +1099,12 @@ def groups(view: NodeView, namespace: str) -> list[Group]:
 
 If pyright rejects `NodeState.__args__`, replace `_STATE_SCHEMA` with `{"type": "string", "enum": list(get_args(NodeState))}` using `typing.get_args`, which is the spelling `topic.py` already uses for `PRIORITIES`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_sovd_resources.py -q`
 Expected: 7 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/sovd/resources.py tests/test_sovd_resources.py
@@ -1125,7 +1125,7 @@ git commit -m "feat(sovd): render a node's record as data items"
 
 The call bridge is a protocol so the router is tested with a fake and no zenoh. `call()` is synchronous from the handler thread's point of view; Task 6 implements it over the loop thread.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_sovd_server.py
@@ -1386,12 +1386,12 @@ def test_hrefs_follow_the_host_header(world):
     assert body["items"][0]["href"] == "http://robot:7690/sovd/v1/components/nav"
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_sovd_server.py -q`
 Expected: `ImportError`
 
-- [ ] **Step 3: Write the server**
+- [x] **Step 3: Write the server**
 
 ```python
 # src/zenode/sovd/server.py
@@ -1718,12 +1718,12 @@ def make_server(
 
 Two implementation notes. `Items[item_type].schema_of()` parametrizes the generic at runtime; if pyright or ty reject the dynamic subscript, precompute the four schemas at module import (`_ENTITY_ITEMS_SCHEMA = Items[EntityReference].schema_of()` etc.) and pick by `item_type`. The `x-zenode-logs` body is built with `json.dumps` of `model_dump()` rather than a `Wire` model because `LogRecordMsg` is already a pydantic model with the right keys; keep it that way.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_sovd_server.py -q`
 Expected: all pass (19 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/sovd/server.py tests/test_sovd_server.py
@@ -1743,7 +1743,7 @@ git commit -m "feat(sovd): HTTP router with upstream's route set and the status 
 - Consumes: `Topology`, `make_server`, `CallsSaturated`; `zenode.service.call_service`; `zenode.presence.PresenceWatcher`; `zenode.cli._declare_latched_subscriber`; `zenode.msgs.{info_pattern, health_pattern, log_pattern}`.
 - Produces: `Sidecar(session, namespace, *, topology=None, call_timeout=2.0, max_calls=32)` with `start()`, `stop()`, `call(key) -> bytes`, attributes `topology`, `namespace`, `vendor_version`. Implements `CallBridge`.
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 ```python
 # tests/test_sovd_integration.py
@@ -1874,12 +1874,12 @@ async def test_the_call_cap_is_enforced(zen):
         sidecar.stop()
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `uv run pytest tests/test_sovd_integration.py -q`
 Expected: `ImportError: cannot import name 'Sidecar'`
 
-- [ ] **Step 3: Write the sidecar and wire the package init**
+- [x] **Step 3: Write the sidecar and wire the package init**
 
 ```python
 # src/zenode/sovd/sidecar.py
@@ -2029,12 +2029,12 @@ Move the `ServiceTimeout` import to the top of the module with the others. The `
 
 Then make `src/zenode/sovd/__init__.py` the version shown in Task 2 Step 3 with the three imports.
 
-- [ ] **Step 4: Run the integration tests and the whole SOVD set**
+- [x] **Step 4: Run the integration tests and the whole SOVD set**
 
 Run: `uv run pytest tests/test_sovd_integration.py tests/test_sovd_server.py -q`
 Expected: all pass. If `test_a_node_is_served_end_to_end` times out waiting for `nav`, the harness namespace is `""` and `PresenceWatcher` with `history=True` replays the token; check that `zen.session` is passed and not a new session.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/sovd/sidecar.py src/zenode/sovd/__init__.py tests/test_sovd_integration.py
@@ -2053,7 +2053,7 @@ git commit -m "feat(sovd): sidecar loop thread, subscriptions and capped call br
 - Consumes: `Sidecar`, `Topology`, `make_server`, `_parse_listen` (loopback default needs its own parse: `_parse_listen` defaults to all interfaces).
 - Produces: `cmd_sovd(args) -> int`; flags `--listen`, `--base-uri`, `--retain-gone`, `--max-gone`, `--log-buffer`, `--max-calls`, `--call-timeout`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_cli_commands.py` (it already imports `main`, `MagicMock`, `pytest`; add `cmd_sovd` to the `zenode.cli` import list):
 
@@ -2113,12 +2113,12 @@ def test_sovd_argv_wiring(monkeypatch):
 
 Check how existing argv tests patch command functions (`main` resolves `fn` via `set_defaults`, so patching the module attribute may not reach it). If `captured` stays empty, patch via the parser: look at how `test_main_*` tests around line 700 do it and follow that pattern.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_cli_commands.py -q -k sovd`
 Expected: `ImportError: cannot import name 'cmd_sovd'`
 
-- [ ] **Step 3: Add the command and the subparser**
+- [x] **Step 3: Add the command and the subparser**
 
 In `src/zenode/cli.py`, after `cmd_export`:
 
@@ -2197,12 +2197,12 @@ The import is local because `zenode.sovd.sidecar` imports `_declare_latched_subs
     p.set_defaults(fn=cmd_sovd)
 ```
 
-- [ ] **Step 4: Run the CLI tests and the full suite**
+- [x] **Step 4: Run the CLI tests and the full suite**
 
 Run: `uv run pytest tests/test_cli_commands.py -q && uv run pytest -q 2>&1 | tail -1`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/cli.py tests/test_cli_commands.py
@@ -2219,7 +2219,7 @@ git commit -m "feat(cli): zenode sovd"
 **Interfaces:**
 - Consumes: the fixtures from Task 1, `Sidecar` and `make_server` from Task 6.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 # tests/test_sovd_conformance.py
@@ -2351,12 +2351,12 @@ async def test_every_response_validates_against_the_pinned_models(zen):
 
 Note the service key `conf/state/get_pose` is namespaced under the test's own prefix so the registry stays clean across modules; the harness namespace is `""`, so the service id is `conf.state.get_pose`.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/test_sovd_conformance.py -q`
 Expected: 1 passed. A failure names the schema and the offending key; fix the model in `model.py`, not the fixture.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_sovd_conformance.py
@@ -2371,7 +2371,7 @@ git commit -m "test(sovd): conformance traversal against the pinned models"
 - Create: `docs/sovd.md`
 - Modify: `docs/cli.md` (new `### sovd` under "Forwarding telemetry", after `export`), `docs/index.md` (toctree entry after `open-telemetry`, status table row), `docs/design/opensovd-adapter.md` (status line)
 
-- [ ] **Step 1: Write `docs/sovd.md`**
+- [x] **Step 1: Write `docs/sovd.md`**
 
 ```markdown
 # SOVD
@@ -2449,7 +2449,7 @@ A SOVD-compatible subset, validated against the OpenSOVD JSON shapes at
 `version-info` and the error vocabulary are that commit's.
 ```
 
-- [ ] **Step 2: Add the CLI section to `docs/cli.md`**
+- [x] **Step 2: Add the CLI section to `docs/cli.md`**
 
 After the `export` section's closing paragraph ("Full detail in [Observability]…"), insert:
 
@@ -2475,7 +2475,7 @@ zenode sovd --listen 127.0.0.1:7690 --base-uri /sovd
 See [SOVD](sovd.md) for what is served.
 ```
 
-- [ ] **Step 3: Index and status line**
+- [x] **Step 3: Index and status line**
 
 In `docs/index.md`, add `sovd` to the main toctree after `open-telemetry`, and change the adapter row's status from `decided` to `phase 1 built`. In `docs/design/opensovd-adapter.md`, change the status sentence to:
 
@@ -2488,7 +2488,7 @@ day. User documentation is in [SOVD](../sovd.md); this page keeps the design
 and its trade-offs.
 ```
 
-- [ ] **Step 4: Run every check**
+- [x] **Step 4: Run every check**
 
 ```bash
 uv run ruff format src tests examples
@@ -2501,7 +2501,7 @@ uv run sphinx-build -E -W -b html docs docs/_build/html 2>&1 | tail -1
 
 Expected: all clean, `build succeeded.`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/sovd.md docs/cli.md docs/index.md docs/design/opensovd-adapter.md

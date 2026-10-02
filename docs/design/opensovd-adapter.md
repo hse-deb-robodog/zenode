@@ -1,10 +1,11 @@
 # OpenSOVD adapter
 
-**Status: decided, not implemented.** Drafted 2026-08-26 as a proposal, revised
-2026-09-21 after the [storage research note](zenoh-storage-for-sovd.md), and
+**Status: Phase 1 implemented.** Drafted 2026-08-26 as a proposal, revised
+2026-09-21 after the [storage research note](zenoh-storage-for-sovd.md),
 decided 2026-10-02 after a design review that also absorbed the
-[reuse research note](opensovd-core-reuse.md). This page is the design; the two
-research notes keep the evidence. Every reference to upstream below is pinned to
+[reuse research note](opensovd-core-reuse.md), and Phase 1 landed the same
+day. User documentation is in [SOVD](../sovd.md); this page is the design and
+the two research notes keep the evidence. Every reference to upstream below is pinned to
 `eclipse-opensovd/opensovd-core` at commit
 `26953d97da4335179083aff41ed52a82886499e7` (2026-09-21, `main`). "The route
 set", "the JSON shapes" and "the SOVD version" all mean that commit.
