@@ -54,6 +54,8 @@ from .pubsub import OnDeadline, Publisher, Subscription
 from .service import ServiceServer
 from .timers import Timer
 from .topic import (
+    DIAGNOSTICS,
+    Diagnostic,
     Service,
     Topic,
     TopicSet,
@@ -69,10 +71,12 @@ from .topic import (
 __version__ = _version("zenode")
 
 __all__ = [
+    "DIAGNOSTICS",
     "Binding",
     "Codec",
     "ConfigError",
     "ContractError",
+    "Diagnostic",
     "DuplicateNodeError",
     "Envelope",
     "Measurement",

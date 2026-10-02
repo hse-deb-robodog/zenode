@@ -46,6 +46,15 @@ PRIORITIES: tuple[Priority, ...] = get_args(Priority)
 
 CONGESTION_CONTROLS: tuple[CongestionControl, ...] = get_args(CongestionControl)
 
+Diagnostic = Literal["read", "operation"]
+"""How a diagnostic client may reach a service. ``"read"`` is served as a
+side-effect-free data resource (an HTTP GET); ``"operation"`` is an action and
+is only ever reachable by an explicit POST. ``None``, the default on
+:class:`Service`, means the service is not exposed at all — what a robot shows
+a diagnostic client is a decision for the contract, not a sidecar's config."""
+
+DIAGNOSTICS: tuple[Diagnostic, ...] = get_args(Diagnostic)
+
 
 def _validate_key(key: str, *, what: str) -> None:
     if not key:
@@ -184,7 +193,26 @@ class Topic(Generic[T]):
 
 @dataclass(frozen=True)
 class Service(Generic[Req, Rep]):
-    """A request/reply endpoint, served over a zenoh queryable."""
+    """A request/reply endpoint, served over a zenoh queryable.
+
+    Args:
+        key: Hierarchical key, relative to the deployment namespace.
+        request: Request payload type — a Pydantic model, or ``bytes``.
+        reply: Reply payload type.
+        request_codec: Wire format for the request. Defaults per ``request``.
+        reply_codec: Wire format for the reply. Defaults per ``reply``.
+        description: One line for humans; published on the node's descriptor
+            and shown by diagnostic tooling.
+        diagnostic: Whether, and how, a diagnostic client (the SOVD sidecar)
+            may call this service. ``"read"`` becomes a data resource reachable
+            by GET, so its ``request`` must be a model with no fields — a GET
+            has no body, and a read that takes arguments would need a second
+            serialization path nobody asked for. ``"operation"`` may act and
+            is never reachable by GET. ``None`` is not exposed. A single
+            tri-state rather than a ``read_only`` flag because a boolean
+            conflates "safe to GET" with "externally visible", and visibility
+            is the deliberate act.
+    """
 
     key: str
     request: type[Req]
@@ -192,10 +220,27 @@ class Service(Generic[Req, Rep]):
     request_codec: Codec[Req] = _CODEC_UNSET
     reply_codec: Codec[Rep] = _CODEC_UNSET
     description: str = ""
+    diagnostic: Diagnostic | None = None
     is_absolute: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
-        _validate_key(self.key, what=f"Service({self.key!r})")
+        what = f"Service({self.key!r})"
+        _validate_key(self.key, what=what)
+        if self.diagnostic is not None and self.diagnostic not in DIAGNOSTICS:
+            raise ContractError(
+                f"{what}: diagnostic must be one of {DIAGNOSTICS} or None, got {self.diagnostic!r}"
+            )
+        if self.diagnostic == "read":
+            # `model_fields` is pydantic's; `bytes` has none, and a model with
+            # any is a read with arguments. `zenode.msgs.Empty` is the canonical
+            # no-field request — named here rather than imported, because
+            # `msgs` imports this module.
+            fields: dict[str, Any] | None = getattr(self.request, "model_fields", None)
+            if fields is None or fields:
+                raise ContractError(
+                    f"{what}: diagnostic='read' needs a request model with no fields "
+                    f"(zenode.msgs.Empty), got {self.request.__name__}"
+                )
         if self.request_codec is None:
             object.__setattr__(self, "request_codec", default_codec(self.request))
         if self.reply_codec is None:

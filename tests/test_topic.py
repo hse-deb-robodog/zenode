@@ -117,3 +117,43 @@ def test_qos_rejects_an_unknown_congestion_control():
     unsupported: Any = "block_first"
     with pytest.raises(ContractError, match="congestion_control must be one of"):
         Topic("q/d", Msg, congestion_control=unsupported)
+
+
+# --------------------------------------------------------------------- diagnostic
+
+
+class _NoFields(BaseModel):
+    pass
+
+
+class _WithField(BaseModel):
+    axis: int = 0
+
+
+def test_services_are_not_diagnosable_by_default():
+    """Exposure to a diagnostic client is a deliberate act, so the default is off."""
+    svc = Service("state/get_pose", request=_NoFields, reply=Msg)
+    assert svc.diagnostic is None
+
+
+def test_a_read_needs_a_request_without_fields():
+    """A SOVD data resource is a GET with no body; a read with arguments has nowhere to put them."""
+    Service("state/get_pose", request=_NoFields, reply=Msg, diagnostic="read")
+    with pytest.raises(ContractError, match="no fields"):
+        Service("state/get_pose", request=_WithField, reply=Msg, diagnostic="read")
+
+
+def test_a_read_rejects_a_raw_request():
+    """``bytes`` has no field list to be empty."""
+    with pytest.raises(ContractError, match="no fields"):
+        Service("state/blob", request=bytes, reply=bytes, diagnostic="read")
+
+
+def test_an_operation_may_take_arguments():
+    svc = Service("motion/home", request=_WithField, reply=Msg, diagnostic="operation")
+    assert svc.diagnostic == "operation"
+
+
+def test_an_unknown_diagnostic_is_a_contract_error():
+    with pytest.raises(ContractError, match="diagnostic"):
+        Service("x/y", request=_NoFields, reply=Msg, diagnostic="write")  # type: ignore[arg-type]
