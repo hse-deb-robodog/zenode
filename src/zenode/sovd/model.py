@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 SOVD_VERSION = "1.1"
 """What ``opensovd-core`` reports at the pinned commit. The design note's
@@ -23,9 +23,12 @@ T = TypeVar("T")
 
 
 class Wire(BaseModel):
-    """Base for everything that leaves the socket."""
+    """Base for everything that leaves the socket.
 
-    model_config = ConfigDict(populate_by_name=True)
+    Aliases are *serialization* aliases: the sidecar builds these models and
+    emits them, never parses them, so the constructor keeps the Python names
+    and only the wire gets the kebab-case.
+    """
 
     def to_json(self) -> bytes:
         return self.model_dump_json(by_alias=True, exclude_none=True).encode()
@@ -39,7 +42,7 @@ class Items(Wire, Generic[T]):
     """``{"items": [...]}``, with the optional sibling ``schema``."""
 
     items: list[T]
-    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
+    schema_: dict[str, Any] | None = Field(default=None, serialization_alias="schema")
 
 
 class EntityReference(Wire):
@@ -67,12 +70,12 @@ class EntityCapabilities(Wire):
     variant: dict[str, str] | None = None
     data: str | None = None
     hosts: str | None = None
-    belongs_to: str | None = Field(default=None, alias="belongs-to")
+    belongs_to: str | None = Field(default=None, serialization_alias="belongs-to")
     components: str | None = None
     apps: str | None = None
     areas: str | None = None
-    x_zenode_logs: str | None = Field(default=None, alias="x-zenode-logs")
-    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
+    x_zenode_logs: str | None = Field(default=None, serialization_alias="x-zenode-logs")
+    schema_: dict[str, Any] | None = Field(default=None, serialization_alias="schema")
 
 
 class Metadata(Wire):
@@ -91,7 +94,7 @@ class ReadResponse(Wire):
 
     id: str
     data: Any
-    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
+    schema_: dict[str, Any] | None = Field(default=None, serialization_alias="schema")
 
 
 class DataCategoryInformation(Wire):
@@ -120,7 +123,7 @@ class SovdInfo(Wire):
 
 class VersionInfo(Wire):
     sovd_info: list[SovdInfo]
-    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
+    schema_: dict[str, Any] | None = Field(default=None, serialization_alias="schema")
 
 
 class GenericError(Wire):

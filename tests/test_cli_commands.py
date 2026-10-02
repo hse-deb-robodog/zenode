@@ -833,7 +833,7 @@ def test_main_exits_quietly_when_the_reader_closes_the_pipe(monkeypatch):
 def test_sovd_defaults_to_loopback_and_the_sovd_mount(monkeypatch, cli_args):
     """Anyone with a browser is a SOVD client, so the exporter's all-interfaces default
     does not transfer."""
-    made: dict[str, object] = {}
+    made: dict[str, Any] = {}
 
     class _Server:
         def serve_forever(self) -> None:
@@ -872,7 +872,7 @@ def test_sovd_defaults_to_loopback_and_the_sovd_mount(monkeypatch, cli_args):
     )
     assert cmd_sovd(args) == 0
     assert made["listen"] == ("127.0.0.1", 7690, {"base_uri": "/sovd"})
-    assert made["sidecar"][0] == "robodog"  # type: ignore[index]
+    assert made["sidecar"][0] == "robodog"
     assert made["started"] and made["stopped"] and made["closed"]
     session.close.assert_called_once()
 
