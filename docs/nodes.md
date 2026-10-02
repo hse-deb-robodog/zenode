@@ -57,7 +57,7 @@ your node. Two mechanisms prevent collisions.
 `_process`, `_tasks`, `_timers` and the rest of the obvious private names are
 yours to use. Python resolves an instance attribute *before* a class method, so
 an unmangled `self._process` assigned during construction would silently shadow
-your `_process` method, surfacing later as a `TypeError`.
+your `_process` method and surface later as a `TypeError`.
 
 **Collisions with the public API are refused at import.** Defining a method or
 attribute that lands on one of `Node`'s own raises `ContractError` when the class
@@ -80,7 +80,7 @@ attributes in the table above.
 
 ## Wiring
 
-Declarative and imperative wiring do the same thing; the decorators only stamp
+Declarative and imperative wiring do the same thing. The decorators only stamp
 metadata, so decorated handlers remain directly callable in tests.
 
 ### Declarative
@@ -95,8 +95,8 @@ metadata, so decorated handlers remain directly callable in tests.
 | `@on_resume(topic)` | Reaction when it recovers. |
 | `@on_matching(topic)` | Reaction when a published topic gains its first subscriber or loses its last. |
 
-`publish()` descriptors materialise **before** `on_start`, so `on_start` may
-use them. Decorated bindings activate **after** it, so handlers never observe a
+`publish()` descriptors materialise before `on_start`, so `on_start` may use
+them. Decorated bindings activate after it, so handlers never observe a
 half-initialised node. A subclass overriding a decorated method without
 re-decorating inherits the binding.
 
@@ -126,7 +126,7 @@ async def on_start(self) -> None:
 | `every(interval, fn, *, name, on_error)` | → `Timer` |
 | `await call(service, request, *, timeout=2.0)` | → reply |
 | `spawn(coro, *, name)` | Tracked background task; a crash is logged. |
-| `await blocking(fn, *args)` | Run blocking code off the event loop. Required in `on_start` — see [Do not block in `on_start`](#do-not-block-in-on_start). |
+| `await blocking(fn, *args)` | Run blocking code off the event loop. Required in `on_start`; see [Do not block in `on_start`](#do-not-block-in-on_start). |
 | `await wait_for_nodes(names, *, timeout=10.0)` | Gate startup on other nodes. |
 
 ## Handlers
@@ -144,24 +144,24 @@ loop, never on a zenoh thread.
 `Envelope` carries the delivery metadata: `node` (the sender), `seq`, `ts_ns`,
 `traceparent`, and `age_s()`.
 
-A handler that raises is logged and counted as `handler_errors`; the
-subscription continues. One bad message never takes a node down.
+A handler that raises is logged and counted as `handler_errors`, and the
+subscription continues, so one bad message cannot take a node down.
 
 ### Backpressure
 
 | Mode | Behaviour | Use for |
 |---|---|---|
-| `queue` (default) | Buffers up to `queue_size`, drops the **oldest** when full. | Streams where every message matters. |
+| `queue` (default) | Buffers up to `queue_size`, drops the oldest when full. | Streams where every message matters. |
 | `latest` | Keeps only the newest sample. | State where only the freshest value matters. |
 
-Drops are counted as `dropped`; the deepest the queue reached since the last
+Drops are counted as `dropped`. The deepest the queue reached since the last
 heartbeat is reported as `queue_max_depth`, which warns before drops begin.
 
 ## Silence detection
 
 `max_age` triggers on a message *arriving* and asks whether it is too old. It
 never fires for a producer that stopped, because no message arrives to check.
-A deadline triggers on a message **not** arriving:
+A deadline triggers when a message does not arrive:
 
 ```python
 self.subscribe(CMD, self.on_cmd, deadline=0.5, on_deadline="stop")
@@ -178,11 +178,11 @@ async def on_cmd(self, msg: Twist) -> None: ...
 
 `"stop"` stops the node the same way a signal does, so `on_stop` runs and
 hardware is released. Use it where continuing without data is worse than
-stopping — a control loop. `"log"` is right for telemetry. A callable receives
-the silence duration in seconds.
+stopping, as in a control loop. `"log"` is right for telemetry. A callable
+receives the silence duration in seconds.
 
-`deadline` must be positive and finite, and `on_deadline` without a `deadline`
-raises `ContractError` at subscription time rather than silently doing nothing.
+`deadline` must be positive and finite. `on_deadline` without a `deadline`
+raises `ContractError` at subscription time instead of being silently ignored.
 
 The clock is the event loop's monotonic clock, stamped on arrival, so unlike
 `max_age` this has no cross-host clock dependency and works where NTP is not
@@ -196,23 +196,23 @@ behave differently:
 | Sample | Satisfies the deadline | Why |
 |---|---|---|
 | Handled normally | Yes | Data is flowing. |
-| Dropped by `max_age` | **No** | It never reaches a handler. |
+| Dropped by `max_age` | No | It never reaches a handler. |
 | Malformed payload | Yes | Decoding happens after arrival is stamped. |
 
 The `max_age` case matters: a producer with a skewed clock sends a healthy
 stream that `max_age` discards in full. If that satisfied the deadline, the
 consumer would believe data was flowing while its handler never ran.
 
-The malformed case is an accepted gap: decoding happens after arrival is
+The malformed case is an accepted gap. Decoding happens after arrival is
 stamped, so a producer emitting garbage keeps the deadline satisfied and
 surfaces as `errors` instead. A schema mismatch is loud on the first message at
 deploy time; clock drift is not.
 
 ### Reacting to transitions
 
-Silence detection is **edge-triggered**: one callback per transition, not one
-per second. The deadline is armed when the subscription starts, so a producer
-that never starts is caught as well as one that dies.
+Silence detection is edge-triggered: one callback per transition, not one per
+second. The deadline is armed when the subscription starts, so a producer that
+never starts is caught as well as one that dies.
 
 ```python
 @on_silence(CMD)
@@ -236,9 +236,9 @@ if self.cmd_sub.silent:
     self.motors.stop()
 ```
 
-`silent` is `True` while the deadline is elapsed; `silent_for` gives the
-seconds since data stopped, and `0.0` while receiving. Prefer `@on_silence`; it
-fires once, at the transition.
+`silent` is `True` while the deadline is elapsed. `silent_for` gives the
+seconds since data stopped, and `0.0` while receiving. Prefer `@on_silence`,
+which fires once, at the transition.
 
 ## Timers
 
@@ -248,7 +248,7 @@ self.every(0.1, self.control_tick, on_error="stop")
 
 Ticks are scheduled against absolute deadlines, so the period does not drift
 with the body's runtime. A body that outruns its deadline skips the missed
-periods — counted as `timer_overruns` — rather than bursting to catch up.
+periods, counted as `timer_overruns`, instead of bursting to catch up.
 
 | `on_error` | Behaviour |
 |---|---|
@@ -258,14 +258,57 @@ periods — counted as `timer_overruns` — rather than bursting to catch up.
 Timer bodies run outside any trace; see
 [trace lifetime](open-telemetry.md#trace-lifetime).
 
+## Measurements
+
+Every node publishes a `NodeHealth` heartbeat every `health_interval` seconds.
+`@metric` puts one of the node's own numbers on it:
+
+```python
+class Nav(Node):
+    name = "nav"
+
+    @metric("battery_soc", unit="1", description="Pack state of charge.")
+    def _soc(self) -> float | None:
+        return self._driver.soc
+
+    @metric("frames_processed", unit="{frame}", kind="counter", integral=True)
+    def _frames(self) -> int:
+        return self._count
+```
+
+Like the wiring decorators, `@metric` only stamps metadata, so the method stays
+directly callable in a test. Ids are validated at import: a name that is not
+`[a-z][a-z0-9_]*`, one that collides with a `NodeHealth` field, or two of them
+sharing an id all raise `ContractError` where the class is defined.
+
+The rules that matter in a body:
+
+- It must not block. Bodies are evaluated from the health timer, so a
+  synchronous call stalls the loop along with every other timer and handler.
+  This is the same failure `Node.blocking` exists to avoid, and the runtime
+  cannot enforce it. Read a value the node already cached instead of fetching
+  one.
+- `None` means unknown, and unknown is not zero. The value is left out of that
+  heartbeat instead of being reported as `0.0`, which is the promise
+  `cpu_percent` already makes. A non-finite number is treated the same way.
+- Raising costs one value, never the heartbeat. The exception is logged,
+  counted in `handler_errors`, and the beat goes out without that id.
+
+Unit, kind and description travel separately, on the latched
+`<ns>/node/<name>/info` descriptor, so they are not repeated at the heartbeat
+rate. `zenode health` prints the values under its table and `zenode export`
+exports them as `zenode_app_<id>`; see
+[Observability](open-telemetry.md#application-metrics) for the export detail and
+for where the line between a measurement and a read-only service falls.
+
 ## Lifecycle
 
 ```
 start() → on_start() → bindings activated → running → stop() → on_stop() → teardown
 ```
 
-`on_start` acquires resources — hardware, files, connections. `on_stop`
-releases them, and runs **whenever `on_start` was entered**, including when it
+`on_start` acquires resources: hardware, files, connections. `on_stop`
+releases them, and runs whenever `on_start` was entered, including when it
 raised part-way or ran out of time. Write it to tolerate partially initialised
 state:
 
@@ -311,10 +354,10 @@ nothing declared.
 
 `on_stop` runs first, then the node's background tasks are cancelled and joined
 for at most `shutdown_timeout` (5 s). Cancellation does not reach a task sitting
-in `blocking()` — an executor future cannot be interrupted once its thread is
-running — so an unbounded join would hand the process to SIGKILL. Tasks still
-going when the bound expires are named in a warning. Hardware is released either
-way, because `on_stop` has already run.
+in `blocking()`, because an executor future cannot be interrupted once its
+thread is running, so an unbounded join would hand the process to SIGKILL.
+Tasks still going when the bound expires are named in a warning. Hardware is
+released either way, because `on_stop` has already run.
 
 ## Presence
 
@@ -328,8 +371,8 @@ async def on_start(self) -> None:
 
 Starting a second node with a live name logs a warning by default, since
 restarts and handovers legitimately overlap for a moment. Set
-`allow_duplicates = False` to make it an error — useful during development,
-where a stray instance silently doubles every message.
+`allow_duplicates = False` to make it an error. That is useful during
+development, where a stray instance silently doubles every message.
 
 ## Publisher
 
@@ -351,7 +394,8 @@ late joiners.
 ### Producing only while someone is listening
 
 Polling `matching` skips the encode but still runs the sensor. For producers
-that are expensive to *run* — a camera, a lidar — take the edge instead:
+that are expensive to *run*, such as a camera or a lidar, take the edge
+instead:
 
 ```python
 class CameraNode(Node):
@@ -368,9 +412,9 @@ class CameraNode(Node):
             self.frames.put(self.camera.encode_jpeg())
 ```
 
-The hook fires **once with the current state** when the node starts, then only
-on a change. zenoh reports changes, not levels; the initial callback is what
-saves the node from guessing its starting state.
+The hook fires once with the current state when the node starts, then only on
+a change. zenoh reports changes, not levels; the initial callback is what saves
+the node from guessing its starting state.
 
 Edges are first-and-last, not per subscriber: a second viewer joining is not
 another rising edge, so a hook that starts hardware is never told to start it
@@ -382,14 +426,14 @@ Same shape imperatively, for a publisher created in `on_start`:
 self.publisher(Topics.frames).on_matching(self._on_viewers)
 ```
 
-Two constraints, both errors at `start()` rather than silent no-ops: the node
-must publish the topic, and the topic must not be latched — a latched publisher
-always matches, so the falling edge would never arrive. A hook that raises is
-logged and counted as `handler_errors`; the node keeps running.
+Two constraints, both raised as errors at `start()`: the node must publish the
+topic, and the topic must not be latched, because a latched publisher always
+matches and the falling edge would never arrive. A hook that raises is logged
+and counted as `handler_errors`; the node keeps running.
 
-Matching is a view of the routing graph, not a delivery receipt: the right
-signal for "don't bother producing this", the wrong one for "the data arrived".
-It says nothing about *who* is listening.
+Matching is a view of the routing graph, not a delivery receipt. It is the
+right signal for "don't bother producing this" and the wrong one for "the data
+arrived", and it says nothing about *who* is listening.
 
 ## Entry point
 
@@ -400,5 +444,5 @@ run(nav_instance)                         # already constructed
 ```
 
 `run()` is what makes a process a node. Importing zenode as a library
-configures nothing — an embedded `Node` inherits the host application's logging
+configures nothing: an embedded `Node` inherits the host application's logging
 and emits only what it is asked to.

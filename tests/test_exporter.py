@@ -1,6 +1,7 @@
 """NodeHealth re-served as Prometheus metrics."""
 
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -10,6 +11,15 @@ import pytest
 
 from zenode.exporter import Registry, Sample, make_server, render
 from zenode.msgs.health import NodeHealth
+from zenode.msgs.info import MeasureDescriptor, NodeInfo
+
+
+def _catalog(node: str = "camera", **measures: dict[str, Any]) -> NodeInfo:
+    """A node's descriptor, from ``{id: {kind, unit, ...}}``."""
+    return NodeInfo(
+        node=node,
+        measures=[MeasureDescriptor(id=name, **spec) for name, spec in measures.items()],
+    )
 
 
 def _health(node: str = "camera", **kwargs: Any) -> NodeHealth:
@@ -23,6 +33,14 @@ def _health(node: str = "camera", **kwargs: Any) -> NodeHealth:
 
 def _lines(text: str, prefix: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith(prefix)]
+
+
+@pytest.fixture
+def clock(monkeypatch) -> dict[str, float]:
+    """A hand-cranked monotonic clock, for aging a registry's samples."""
+    fake = {"now": 10.0}
+    monkeypatch.setattr(time, "monotonic", lambda: fake["now"])
+    return fake
 
 
 def _value(text: str, prefix: str) -> str:
@@ -77,10 +95,13 @@ def test_last_seen_grows_with_silence():
     assert _value(text, "zenode_node_last_seen_seconds") == "4.5"
 
 
-def test_stale_nodes_are_dropped_entirely():
+def test_stale_nodes_are_dropped_entirely(clock):
     """Frozen counters read as a healthy node doing nothing; absence does not."""
-    samples = {"camera": Sample(_health("camera"), 100.0), "gone": Sample(_health("gone"), 10.0)}
-    text = render(samples, "", now=100.0, stale_after=60.0)
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("gone").model_dump_json().encode())
+    clock["now"] = 100.0
+    registry.offer(_health("camera").model_dump_json().encode())
+    text = registry.render()
     assert 'node="camera"' in text
     assert 'node="gone"' not in text
 
@@ -103,6 +124,158 @@ def test_empty_registry_still_renders():
     assert render({}, "", now=100.0).endswith("\n")
 
 
+def test_host_becomes_a_label():
+    text = render({"camera": Sample(_health(sent=3, host="jetson"), 100.0)}, "robodog", now=100.0)
+    assert 'zenode_node_sent_total{host="jetson",namespace="robodog",node="camera"} 3' in text
+
+
+def test_an_unknown_host_is_omitted_rather_than_labelled_empty():
+    """An older node publishes no host, and `host=""` would read as one."""
+    text = render({"camera": Sample(_health(sent=3), 100.0)}, "robodog", now=100.0)
+    assert 'zenode_node_sent_total{namespace="robodog",node="camera"} 3' in text
+    assert 'host=""' not in text
+
+
+def test_the_host_label_reaches_the_info_and_last_seen_series_too():
+    text = render({"camera": Sample(_health(host="jetson"), 100.0)}, "", now=100.0)
+    assert 'zenode_node_info{host="jetson",namespace="",node="camera",state="running"} 1' in text
+    assert 'zenode_node_last_seen_seconds{host="jetson",namespace="",node="camera"}' in text
+
+
+# ----------------------------------------------------- application measurements
+
+
+def test_app_measurements_take_their_type_and_help_from_the_catalog():
+    text = render(
+        {"camera": Sample(_health(measures={"frames_processed": 1204.0}), 100.0)},
+        "",
+        now=100.0,
+        catalogs={
+            "camera": _catalog(
+                frames_processed={
+                    "kind": "counter",
+                    "unit": "{frame}",
+                    "description": "Frames handled.",
+                }
+            )
+        },
+    )
+    assert "# TYPE zenode_app_frames_processed_total counter" in text
+    assert "# HELP zenode_app_frames_processed_total Frames handled. [{frame}]" in text
+    assert 'zenode_app_frames_processed_total{namespace="",node="camera"} 1204' in text
+
+
+def test_a_gauge_measurement_carries_no_total_suffix():
+    text = render(
+        {"camera": Sample(_health(measures={"battery_soc": 0.87}, host="jetson"), 100.0)},
+        "robodog",
+        now=100.0,
+        catalogs={"camera": _catalog(battery_soc={"unit": "1"})},
+    )
+    assert "# TYPE zenode_app_battery_soc gauge" in text
+    assert 'zenode_app_battery_soc{host="jetson",namespace="robodog",node="camera"} 0.87' in text
+
+
+def test_a_value_without_a_descriptor_contributes_no_series():
+    """A series whose TYPE flips mid-history is worse than a transient hole."""
+    text = render({"camera": Sample(_health(measures={"battery_soc": 0.87}), 100.0)}, "", now=100.0)
+    assert _lines(text, "zenode_app_") == []
+
+
+def test_a_node_whose_own_catalog_has_not_arrived_is_left_out_of_a_shared_series():
+    samples = {
+        "camera": Sample(_health("camera", measures={"battery_soc": 0.5}), 100.0),
+        "motors": Sample(_health("motors", measures={"battery_soc": 0.6}), 100.0),
+    }
+    text = render(samples, "", now=100.0, catalogs={"camera": _catalog(battery_soc={})})
+    assert len(_lines(text, "zenode_app_battery_soc{")) == 1
+    assert 'node="camera"' in _lines(text, "zenode_app_battery_soc{")[0]
+
+
+def test_two_kinds_for_one_id_export_the_first_node_in_sorted_order():
+    """One Prometheus name cannot carry two types; the rule must be stable."""
+    samples = {
+        "camera": Sample(_health("camera", measures={"widgets": 1.0}), 100.0),
+        "motors": Sample(_health("motors", measures={"widgets": 2.0}), 100.0),
+    }
+    catalogs = {
+        "camera": _catalog("camera", widgets={"kind": "gauge"}),
+        "motors": _catalog("motors", widgets={"kind": "counter"}),
+    }
+    text = render(samples, "", now=100.0, catalogs=catalogs)
+    assert "# TYPE zenode_app_widgets gauge" in text
+    assert _lines(text, "zenode_app_widgets_total") == []
+    assert len(_lines(text, "zenode_app_widgets{")) == 1
+    assert 'node="camera"' in _lines(text, "zenode_app_widgets{")[0]
+
+
+def test_a_kind_conflict_is_logged_once_however_often_the_registry_is_read(caplog):
+    """A deployment mistake is not news on every 15-second scrape or push."""
+    registry = Registry("")
+    registry.offer(_health("camera", measures={"widgets": 1.0}).model_dump_json().encode())
+    registry.offer(_health("motors", measures={"widgets": 2.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("camera", widgets={"kind": "gauge"}).model_dump_json().encode())
+    registry.offer_info(_catalog("motors", widgets={"kind": "counter"}).model_dump_json().encode())
+    with caplog.at_level("WARNING", logger="zenode.exporter"):
+        text = registry.render()  # a scrape
+        registry.snapshot()  # what a push reads
+
+    assert "# TYPE zenode_app_widgets gauge" in text
+    assert len([r for r in caplog.records if "widgets" in r.getMessage()]) == 1
+
+
+def test_a_measurement_absent_from_this_heartbeat_is_simply_not_reported():
+    """`None` from a measurement means unknown, and unknown emits no point."""
+    text = render(
+        {"camera": Sample(_health(), 100.0)},
+        "",
+        now=100.0,
+        catalogs={"camera": _catalog(battery_soc={})},
+    )
+    assert _lines(text, "zenode_app_") == []
+
+
+def test_a_stale_node_takes_its_app_series_with_it(clock):
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("gone", measures={"battery_soc": 0.5}).model_dump_json().encode())
+    registry.offer_info(_catalog("gone", battery_soc={}).model_dump_json().encode())
+    clock["now"] = 100.0
+    assert _lines(registry.render(), "zenode_app_") == []
+
+
+def test_a_dead_nodes_descriptor_cannot_win_a_kind_conflict(clock, caplog):
+    """`offer_info` keeps a descriptor after its node dies; conflicts must not.
+
+    Otherwise a node decommissioned an hour ago takes a live node's series off
+    `/metrics` while the push path — which reads the same snapshot — carries it
+    normally, and one registry gives two answers.
+    """
+    registry = Registry("", stale_after=60.0)
+    registry.offer(_health("alpha", measures={"widgets": 1.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("alpha", widgets={"kind": "counter"}).model_dump_json().encode())
+    clock["now"] = 100.0  # alpha is now stale …
+    registry.offer(_health("zulu", measures={"widgets": 2.0}).model_dump_json().encode())
+    registry.offer_info(_catalog("zulu", widgets={"kind": "gauge"}).model_dump_json().encode())
+
+    with caplog.at_level("WARNING", logger="zenode.exporter"):
+        text = registry.render()
+    assert "# TYPE zenode_app_widgets gauge" in text
+    assert 'zenode_app_widgets{namespace="",node="zulu"} 2' in text
+    # …and the once-only warning is not burned by a node nobody can see.
+    assert [r for r in caplog.records if "widgets" in r.getMessage()] == []
+
+
+def test_a_counter_past_a_million_is_rendered_exactly():
+    """`%g` alone would emit 1.20457e+06, which is not a count any more."""
+    text = render(
+        {"camera": Sample(_health(measures={"frames": 1204567.0}), 100.0)},
+        "",
+        now=100.0,
+        catalogs={"camera": _catalog(frames={"kind": "counter"})},
+    )
+    assert 'zenode_app_frames_total{namespace="",node="camera"} 1204567' in text
+
+
 # ------------------------------------------------------------------ registry
 
 
@@ -120,6 +293,32 @@ def test_registry_ignores_foreign_payloads():
     registry.offer(b"not json")
     registry.offer(b'{"unrelated": true}')
     assert len(registry) == 0
+
+
+def test_registry_ignores_foreign_payloads_on_the_info_key_too():
+    registry = Registry("")
+    registry.offer_info(b"not json")
+    registry.offer_info(b'{"unrelated": true}')
+    assert registry.snapshot() == ({}, {})
+
+
+def test_registry_joins_a_catalog_to_its_nodes_heartbeat():
+    registry = Registry("")
+    registry.offer(_health(measures={"battery_soc": 0.87}).model_dump_json().encode())
+    registry.offer_info(_catalog(battery_soc={"unit": "1"}).model_dump_json().encode())
+
+    samples, catalogs = registry.snapshot()
+    assert set(samples) == {"camera"} and set(catalogs) == {"camera"}
+    assert 'zenode_app_battery_soc{namespace="",node="camera"} 0.87' in registry.render()
+
+
+def test_a_snapshot_reports_no_catalog_for_a_node_it_dropped_as_stale():
+    """A scrape and a push must agree on which nodes exist, and on their types."""
+    registry = Registry("", stale_after=0.0)
+    registry.offer(_health().model_dump_json().encode())
+    registry.offer_info(_catalog().model_dump_json().encode())
+    time.sleep(0.01)
+    assert registry.snapshot() == ({}, {})
 
 
 # ---------------------------------------------------------------------- http

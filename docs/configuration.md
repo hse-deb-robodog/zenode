@@ -5,8 +5,8 @@ and how nodes share facts without duplicating them.
 
 ## Overview
 
-One TOML file describes a deployment. Each node validates **only its own
-section**, so a broken `[node.joy]` cannot prevent `nav` from starting.
+One TOML file describes a deployment. Each node validates only its own
+section, so a broken `[node.joy]` cannot prevent `nav` from starting.
 
 ```toml
 [transport]
@@ -29,7 +29,7 @@ on a LAN with no configuration at all.
 Lowest to highest:
 
 1. Model defaults
-2. TOML file — `./zenode.toml`, or `$ZENODE_CONFIG`, or `run(config_path=…)`
+2. TOML file: `./zenode.toml`, or `$ZENODE_CONFIG`, or `run(config_path=…)`
 3. Environment variables
 
 Environment names are derived from the section: `ZENODE_TRANSPORT__CONNECT`,
@@ -55,7 +55,7 @@ class Nav(Node):
 
 `run()` loads and validates it before the node starts. A model with required
 fields and nothing to fill them raises `ConfigError` with the validation
-detail, at startup rather than at first use.
+detail at startup, instead of at first use.
 
 The loaded model is available as `self.config`, and `@every` can read a rate
 from it by name:
@@ -73,6 +73,7 @@ mode = "peer"                 # or "client"
 connect = ["tcp/host:7447"]
 listen = []
 namespace = "robodog"
+host = "jetson"               # deployment label; defaults to socket.gethostname()
 multicast_scouting = true
 shared_memory = false
 timestamping = true
@@ -84,6 +85,7 @@ timestamping = true
 | `connect` | `[]` | Endpoints to dial. |
 | `listen` | `[]` | Endpoints to accept on. |
 | `namespace` | `""` | Prefixed to every relative key. |
+| `host` | `""` | The machine a node reports running on. Empty means `socket.gethostname()`. |
 | `multicast_scouting` | `true` | Automatic discovery on a LAN. |
 | `shared_memory` | `false` | See [Shared memory](shared-memory.md). |
 | `timestamping` | `true` | HLC timestamps; required for latched topics. |
@@ -100,14 +102,14 @@ timestamping = true
 
 `peer` with multicast is right on a robot and on a lab LAN: nodes find each
 other with no infrastructure. Use `client` with an explicit `connect` when
-multicast is blocked — which is common on corporate networks, in Docker with
+multicast is blocked, which is common on corporate networks, in Docker with
 default bridge networking, and across subnets. `zenode doctor` reports whether
 scouting is working.
 
 ## Shared sections
 
-Facts belonging to the robot rather than to any one node — chassis geometry,
-frame ids, calibration — get their own section instead of being copied into two
+Facts that belong to the robot rather than to any one node (chassis geometry,
+frame ids, calibration) get their own section instead of being copied into two
 `[node.*]` tables where they can silently diverge:
 
 ```toml
@@ -127,7 +129,7 @@ geometry = load_section(Geometry, "geometry")
 
 `load_section` follows the same precedence and supports `ZENODE_GEOMETRY__*`.
 Two nodes computing odometry from the same wheel radius should read it from one
-place; see [Conventions](conventions.md) for what belongs there.
+place. See [Conventions](conventions.md) for what belongs there.
 
 ## Logging
 

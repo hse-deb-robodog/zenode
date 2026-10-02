@@ -15,8 +15,8 @@ from conftest import internals
 
 from zenode import Node
 from zenode.errors import ContractError
-from zenode.metrics import ProcessStats
 from zenode.node import _INSTANCE_API, _OVERRIDE_POINTS
+from zenode.reporting import Reporter
 
 
 def test_private_names_are_mangled_out_of_the_subclass_namespace() -> None:
@@ -29,17 +29,17 @@ def test_private_names_are_mangled_out_of_the_subclass_namespace() -> None:
     class Detector(Node):
         name = "ns-detector"
 
-        def _process(self, frame: str) -> str:
-            return f"processed {frame}"
+        def _reporter(self, event: str) -> str:
+            return f"reported {event}"
 
         def _state(self) -> str:
             return "mine"
 
     node = Detector()
-    assert node._process("frame") == "processed frame"
+    assert node._reporter("event") == "reported event"
     assert node._state() == "mine"
     # …and the runtime still has its own, under the mangled name.
-    assert isinstance(internals(node).process, ProcessStats)
+    assert isinstance(internals(node).reporter, Reporter)
     assert internals(node).state == node.state  # the public property still reads it
 
 

@@ -10,7 +10,7 @@ zenode {topics,echo,hz,health,logs,trace,export,nodes,doctor}
 ```
 
 Every command reads the same configuration a node does, so it addresses the
-same deployment without further arguments. `nodes` answers *is it up?*;
+same deployment without further arguments. `nodes` answers *is it up?* and
 `health` answers *how well is it doing?*
 
 ## Common options
@@ -25,7 +25,7 @@ Accepted by every command:
 | `-n, --namespace NAME` | Override the deployment namespace. |
 | `--contract MODULE` | Import a module defining `TopicSet`s, for typed output. Accepted by `topics`, `echo` and `doctor`. |
 
-`--contract` is what makes output typed rather than raw. Point it at your
+`--contract` is what turns raw output into typed output. Point it at your
 contract package:
 
 ```bash
@@ -36,7 +36,7 @@ zenode echo state/odometry --contract my_robot.contract -n robodog
 
 ### `topics`
 
-Lists the registered contract — every `Topic` and `Service` declared in an
+Lists the registered contract: every `Topic` and `Service` declared in an
 imported `TopicSet`, with its flags and where it was declared.
 
 ```bash
@@ -53,8 +53,8 @@ camera/rgb                 bytes           trace@0.01,shm,prio=data_low         
 
 Flags show what the contract promises: `latched(n)`, `max_age=`, `trace` or
 `trace@<ratio>` for a trace root, `shm`, and the
-[QoS](contracts.md#quality-of-service) settings — `prio=<band>`, `block`,
-`express` — each shown only when it differs from the default.
+[QoS](contracts.md#quality-of-service) settings (`prio=<band>`, `block`,
+`express`). Each is shown only when it differs from the default.
 
 ## Watching data
 
@@ -84,7 +84,7 @@ Measures the publish rate on a key over a rolling window.
 zenode hz camera/rgb --window 5
 ```
 
-Confirms a producer actually holds its rate, rather than inferring it from a
+Confirms that a producer holds its rate, instead of inferring the rate from a
 timer's configuration.
 
 ## Watching nodes
@@ -97,8 +97,8 @@ Lists nodes holding a liveliness token.
 zenode nodes --watch
 ```
 
-`--watch` prints join and leave events as they happen — useful for catching a
-node that restarts in a loop.
+`--watch` prints join and leave events as they happen, which is useful for
+catching a node that restarts in a loop.
 
 ### `health`
 
@@ -109,21 +109,31 @@ zenode health --watch
 ```
 
 ```
-NODE       STATE     UP  SEEN  CPU%     RSS  SENT  RECV  QMAX  DROP STALE  ERR OVER  MISS   MSG AGE ms  HANDLER ms
-camera     running   6s  1.9s   4.2   50.1M   177     0     0     0     0    0    0     0      0.0/0.0     0.0/0.0
-perception running   6s  1.9s  61.8  184.3M     2   175    12     0     0    0    3     0   10.1/116.9  10.1/151.0
+NODE       HOST     STATE     UP  SEEN  CPU%     RSS  SENT  RECV  QMAX  DROP STALE  ERR OVER  MISS   MSG AGE ms  HANDLER ms
+camera     jetson   running   6s  1.9s   4.2   50.1M   177     0     0     0     0    0    0     0      0.0/0.0     0.0/0.0
+perception jetson   running   6s  1.9s  61.8  184.3M     2   175    12     0     0    0    3     0   10.1/116.9  10.1/151.0
+
+perception:
+  battery_soc = 0.87 [1]
+  frames_processed = 1204 [{frame}]
 ```
 
 | Column | Meaning |
 |---|---|
+| `HOST` | The machine that node runs on. Blank where the deployment set none and the node predates the field. |
 | `SEEN` | Seconds since that node last reported. A number that stops rising is a node that stopped. |
-| `QMAX` | Deepest any queue got since the last heartbeat — warns before `DROP` starts. |
+| `QMAX` | Deepest any queue got since the last heartbeat. It warns before `DROP` starts. |
 | `OVER` | Timer overruns. |
 | `MISS` | Deadline misses: a subscription that went silent. |
 | `MSG AGE` / `HANDLER` | mean/max in milliseconds, over the last interval. |
 
+The block under the table is the nodes' own
+[`@metric` measurements](nodes.md#measurements), with the units from each node's
+latched descriptor. Only nodes that report measurements appear there, so a fleet
+that declares none prints nothing extra.
+
 Exits non-zero when nothing answered, so it composes into a health check.
-`--wait` sets how long to collect first; `--watch` refreshes in place.
+`--wait` sets how long to collect first, and `--watch` refreshes in place.
 
 ## Debugging a pipeline
 
@@ -161,8 +171,8 @@ TRACE 45d06757a549f538cf9ada58309e0bef
   motors    perception/boxes  seq 9  ← detector  age  4.4ms  handler  4.2ms  span 50037f00…
 ```
 
-No collector required — it queries live nodes directly. Only sampled traces are
-recorded; see [Observability](open-telemetry.md).
+No collector is required, because it queries live nodes directly. Only sampled
+traces are recorded. See [Observability](open-telemetry.md).
 
 ## Forwarding telemetry
 
@@ -209,4 +219,4 @@ zenode 0.1.0 doctor
 ```
 
 Run it first when nodes cannot see each other. The multicast check usually
-explains it; a firewall dropping UDP 7446 is the most common cause.
+explains it, and a firewall dropping UDP 7446 is the most common cause.

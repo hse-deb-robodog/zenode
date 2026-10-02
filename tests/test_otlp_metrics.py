@@ -10,6 +10,7 @@ import pytest
 
 from zenode.exporter import COUNTERS, GAUGES, Registry, Sample
 from zenode.msgs.health import NodeHealth
+from zenode.msgs.info import MeasureDescriptor, NodeInfo
 from zenode.otlp_metrics import OtlpMetricShipper, encode
 
 NOW_NS = 1_700_000_000_000_000_000
@@ -18,6 +19,13 @@ NOW_NS = 1_700_000_000_000_000_000
 def _health(node: str = "camera", **kwargs: Any) -> NodeHealth:
     return NodeHealth.model_validate(
         {"node": node, "state": "running", "uptime_s": 6.0, "ts_ns": NOW_NS, **kwargs}
+    )
+
+
+def _catalog(node: str = "camera", **measures: dict[str, Any]) -> NodeInfo:
+    return NodeInfo(
+        node=node,
+        measures=[MeasureDescriptor(id=name, **spec) for name, spec in measures.items()],
     )
 
 
@@ -121,6 +129,89 @@ def test_both_paths_export_the_same_fields():
     assert set(_metrics(payload)) == {m.otlp for m in (*COUNTERS, *GAUGES)}
 
 
+def test_host_becomes_the_host_name_resource_attribute():
+    """`host.name` is the OpenTelemetry semantic convention, beside service.name."""
+    payload = encode({"camera": Sample(_health(host="jetson"), 1.0)}, "", now_ns=NOW_NS)
+    attrs = payload["resourceMetrics"][0]["resource"]["attributes"]
+    assert {"key": "host.name", "value": {"stringValue": "jetson"}} in attrs
+
+
+def test_an_unknown_host_adds_no_resource_attribute():
+    payload = encode({"camera": Sample(_health(), 1.0)}, "", now_ns=NOW_NS)
+    attrs = payload["resourceMetrics"][0]["resource"]["attributes"]
+    assert not any(a["key"] == "host.name" for a in attrs)
+
+
+# ----------------------------------------------------- application measurements
+
+
+def test_app_measurements_are_encoded_from_the_catalog():
+    payload = encode(
+        {"camera": Sample(_health(measures={"battery_soc": 0.87, "frames": 1204.0}), 1.0)},
+        "",
+        now_ns=NOW_NS,
+        catalogs={
+            "camera": _catalog(
+                battery_soc={"unit": "1", "description": "Pack SoC."},
+                frames={"kind": "counter", "integral": True, "unit": "{frame}"},
+            )
+        },
+    )
+    metrics = _metrics(payload)
+    soc = metrics["zenode.app.battery_soc"]
+    assert soc["gauge"]["dataPoints"][0]["asDouble"] == 0.87
+    assert soc["unit"] == "1" and soc["description"] == "Pack SoC."
+
+    frames = metrics["zenode.app.frames"]
+    assert frames["sum"]["isMonotonic"] is True
+    assert frames["sum"]["dataPoints"][0]["asInt"] == "1204"
+
+
+def test_an_application_counter_shares_the_nodes_start_instant():
+    """So a restart reads as a reset, exactly as the built-in counters do."""
+    payload = encode(
+        {"camera": Sample(_health(measures={"frames": 3.0}), 1.0)},
+        "",
+        now_ns=NOW_NS,
+        catalogs={"camera": _catalog(frames={"kind": "counter"})},
+    )
+    point = _metrics(payload)["zenode.app.frames"]["sum"]["dataPoints"][0]
+    assert int(point["startTimeUnixNano"]) == NOW_NS - 6_000_000_000
+
+
+def test_a_value_without_a_descriptor_is_not_encoded():
+    payload = encode(
+        {"camera": Sample(_health(measures={"battery_soc": 0.87}), 1.0)}, "", now_ns=NOW_NS
+    )
+    assert not [name for name in _metrics(payload) if name.startswith("zenode.app.")]
+
+
+def test_a_descriptor_without_a_value_encodes_nothing():
+    """Unknown is not zero, on this path as well."""
+    payload = encode(
+        {"camera": Sample(_health(), 1.0)},
+        "",
+        now_ns=NOW_NS,
+        catalogs={"camera": _catalog(battery_soc={})},
+    )
+    assert "zenode.app.battery_soc" not in _metrics(payload)
+
+
+def test_the_losing_side_of_a_kind_conflict_is_omitted_here_too():
+    """Both export paths read one table, so they cannot disagree about a type."""
+    samples = {
+        "camera": Sample(_health("camera", measures={"widgets": 1.0}), 1.0),
+        "motors": Sample(_health("motors", measures={"widgets": 2.0}), 1.0),
+    }
+    catalogs = {
+        "camera": _catalog("camera", widgets={"kind": "gauge"}),
+        "motors": _catalog("motors", widgets={"kind": "counter"}),
+    }
+    payload = encode(samples, "", now_ns=NOW_NS, catalogs=catalogs)
+    assert "zenode.app.widgets" in _metrics(payload, 0)  # camera, sorted first
+    assert "zenode.app.widgets" not in _metrics(payload, 1)
+
+
 def test_empty_registry_encodes_to_nothing():
     assert encode({}, "", now_ns=NOW_NS)["resourceMetrics"] == []
 
@@ -173,6 +264,18 @@ def test_flush_pushes_the_registry(collector):
     assert shipper.pushed == 1
     assert len(received) == 1
     assert _metrics(received[0])["zenode.node.sent"]["sum"]["dataPoints"][0]["asInt"] == "42"
+
+
+def test_flush_carries_the_catalog_the_registry_holds(collector):
+    """The shipper must read the same descriptors the scrape endpoint renders."""
+    url, received, _ = collector
+    registry = Registry("robodog")
+    registry.offer(_health(measures={"battery_soc": 0.87}).model_dump_json().encode())
+    registry.offer_info(_catalog(battery_soc={"unit": "1"}).model_dump_json().encode())
+
+    assert OtlpMetricShipper(url, registry).flush(NOW_NS) == 1
+    soc = _metrics(received[0])["zenode.app.battery_soc"]
+    assert soc["gauge"]["dataPoints"][0]["asDouble"] == 0.87
 
 
 def test_endpoint_path_is_appended(collector):

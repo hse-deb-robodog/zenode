@@ -205,6 +205,38 @@ class Service(Generic[Req, Rep]):
         return resolve_key(self.key, namespace, absolute=self.is_absolute)
 
 
+def topic_flags(topic: Topic[Any]) -> list[str]:
+    """A topic's delivery semantics as short display strings.
+
+    ``zenode topics`` renders these into a column and every node puts them on
+    its :class:`~zenode.msgs.info.NodeInfo` descriptor. One function because two
+    renderings of the same flags would drift, and the drift would show up as a
+    listing that disagrees with the bus about what a topic actually does.
+
+    QoS appears only when it differs from the default: it is a per-topic
+    exception, and a listing that repeats ``prio=data`` on every row buries the
+    one topic that actually claims precedence.
+    """
+    flags: list[str] = []
+    if topic.latched:
+        flags.append(f"latched({topic.history})")
+    if topic.max_age is not None:
+        flags.append(f"max_age={topic.max_age}")
+    if topic.trace:
+        # Where traces begin is the first thing you want from a contract
+        # listing when a pipeline spans five processes.
+        flags.append("trace" if topic.trace_ratio >= 1.0 else f"trace@{topic.trace_ratio}")
+    if topic.shm:
+        flags.append("shm")
+    if topic.priority != "data":
+        flags.append(f"prio={topic.priority}")
+    if topic.congestion_control != "drop":
+        flags.append(topic.congestion_control)
+    if topic.express:
+        flags.append("express")
+    return flags
+
+
 @dataclass(frozen=True)
 class RegisteredEntry:
     """A Topic or Service found in a TopicSet, with its declaration site."""

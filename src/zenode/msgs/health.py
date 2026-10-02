@@ -37,6 +37,12 @@ class NodeHealth(BaseModel):
     """
 
     node: str
+    host: str = ""
+    """The machine this node runs on. A deployment label, not an identity:
+    nothing is addressed by it and no key contains it, so two nodes sharing a
+    host is a fact about where the CPU is burning, never a lookup. Defaults to
+    ``socket.gethostname()``; set ``[transport] host`` where that is a random
+    container id rather than a name a person recognizes."""
     state: NodeState
     uptime_s: float
     sent: int = 0
@@ -83,5 +89,17 @@ class NodeHealth(BaseModel):
     handler_mean_ms: float = 0.0
     """Time spent inside handlers — subscription and service alike."""
     handler_max_ms: float = 0.0
+
+    measures: dict[str, float] = {}
+    """This node's own ``@metric`` declarations, sampled for this heartbeat.
+
+    An id absent from the dict is **unknown, not zero** — the measurement
+    returned ``None``, raised, or is not declared by this node at all. Unit,
+    kind and description live on the latched
+    :class:`~zenode.msgs.info.NodeInfo` descriptor instead of here, because
+    they never change and this message goes out every ``health_interval``.
+
+    Bounded by declaration: the ids are fixed once the node class body has
+    executed, which is what keeps the exported series countable."""
 
     ts_ns: int

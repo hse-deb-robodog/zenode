@@ -32,6 +32,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+import socket
 import sys
 import time
 import typing
@@ -48,15 +49,17 @@ from .config import (
     load_node_config,
     load_transport_config,
 )
-from .declarative import Binding, collect_bindings, collect_publishers
+from .declarative import Binding, collect_bindings, collect_metrics, collect_publishers
 from .errors import ConfigError, ContractError, DuplicateNodeError, StartTimeout
 from .log import LogPublisher, setup_logging
-from .metrics import ProcessStats, summarize
+from .metrics import ProcessStats
 from .msgs.health import NodeHealth, NodeState, health_key
+from .msgs.info import NodeInfo, info_key
 from .msgs.log import LogRecordMsg, log_key
 from .msgs.trace import TraceHops, TraceQuery, trace_key
 from .presence import list_nodes_async, presence_key
 from .pubsub import Handler, OnDeadline, Publisher, Subscription, SubscriptionMode
+from .reporting import Reporter, ReporterSources
 from .service import ServiceHandler, ServiceServer, call_service
 from .shm import DEFAULT_POOL_BYTES, ShmPool
 from .timers import OnTimerError, Timer, resolve_interval
@@ -195,6 +198,10 @@ class Node:
         Widening :data:`_OVERRIDE_POINTS` is a contract change: those names are
         read off the *class*, so the runtime keeps working when a subclass
         supplies its own.
+
+        ``collect_metrics`` runs here for the same reason: a duplicate ``@metric``
+        id is a typo, and a typo belongs at import rather than at the first
+        heartbeat, where the only symptom is a measurement that never appears.
         """
         super().__init_subclass__(**kwargs)
         reserved = {n for n in dir(Node) if not n.startswith("__")} | _INSTANCE_API
@@ -206,6 +213,7 @@ class Node:
                 f"overriding it, so rename yours. Redefinable: "
                 f"{', '.join(sorted(_OVERRIDE_POINTS))}."
             )
+        collect_metrics(cls)
 
     def __init__(
         self,
@@ -249,7 +257,6 @@ class Node:
         self.__loop: asyncio.AbstractEventLoop | None = None
         self.__stop_event = asyncio.Event()
         self.__state: NodeState = "stopped"
-        self.__started_monotonic = 0.0
         self.__entered_on_start = False
         self.__has_run = False
         self.__token: Any = None
@@ -258,11 +265,34 @@ class Node:
         self.__servers: list[ServiceServer[Any, Any]] = []
         self.__timers: list[Timer] = []
         self.__tasks: list[asyncio.Task[Any]] = []
-        self.__health_pub: Publisher[NodeHealth] | None = None
         self.__log_handler: LogPublisher | None = None
-        self.__process = ProcessStats()
         self.__ring = TraceRing(self.trace_ring) if self.trace_ring else None
         self.__shm = ShmPool(self.shm_pool_bytes, log=self.log)
+
+        from . import __version__  # module level would be a cycle: __init__ imports node
+
+        # Everything the heartbeat and the descriptor observe, spelled out once.
+        # The entity lists are the live ones, so a snapshot is always current;
+        # scalars that change (state, the log handler created at start) go in
+        # as callables. The republish protocol lives entirely in `Reporter`.
+        self.__reporter = Reporter(
+            ReporterSources(
+                name=self.name,
+                host=self.__transport.host or socket.gethostname(),
+                zenode_version=__version__,
+                state=lambda: self.__state,
+                publishers=self.__publishers,
+                subscriptions=self.__subscriptions,
+                servers=self.__servers,
+                timers=self.__timers,
+                log_dropped=lambda: self.__log_handler.dropped if self.__log_handler else 0,
+                shm_fallbacks=lambda: self.__shm.fallbacks,
+                process=ProcessStats(),
+                metrics=collect_metrics(type(self)),
+                resolve=lambda attr: getattr(self, attr),
+                log=self.log,
+            )
+        )
 
     # ------------------------------------------------------------------ hooks
 
@@ -340,7 +370,6 @@ class Node:
             )
         self.__loop = asyncio.get_running_loop()
         self.__state = "starting"
-        self.__started_monotonic = time.monotonic()
         if self.__session is None:
             self.__session = await asyncio.to_thread(zenoh.open, self.__transport.to_zenoh_config())
         try:
@@ -355,10 +384,17 @@ class Node:
                 # must not take the link from control traffic. Not `background`
                 # like the logs, though — the heartbeat is fixed-rate and tiny,
                 # and it is what tells an operator the node is alive at all.
-                self.__health_pub = self.publisher(
+                health_pub = self.publisher(
                     Topic(health_key(self.name), NodeHealth, priority="data_low")
                 )
-                self.every(self.health_interval, self._publish_health, name="health")
+                # Latched, so a sidecar started an hour later still gets the
+                # descriptor — and gets it from zenoh's cache rather than from
+                # this node's event loop, which is the point (see msgs/info.py).
+                info_pub = self.publisher(
+                    Topic(info_key(self.name), NodeInfo, latched=True, priority="data_low")
+                )
+                self.__reporter.attach(health_pub.put, info_pub.put)
+                self.every(self.health_interval, self.__reporter.beat, name="health")
             self.__entered_on_start = True
             await self._run_on_start()
             self._wire_bindings()
@@ -369,6 +405,12 @@ class Node:
                     Service(trace_key(self.name), request=TraceQuery, reply=TraceHops),
                     self._answer_trace,
                 )
+            # After everything above, so the first snapshot is complete. It is
+            # the one step here that may fail without taking the node down —
+            # `publish_info` marks itself ready on entry, so a failure here is
+            # retried by the health timer rather than leaving the node
+            # permanently undescribed.
+            self.__reporter.publish_info()
         except BaseException:
             # on_stop() runs on the failure path too: on_start is where the
             # hardware is acquired, and a node that dies half-way through it
@@ -710,6 +752,7 @@ class Node:
             inner, topic=topic, key=key, node_name=self.name, pool=self.__shm, log=self.log
         )
         self.__publishers.append(pub)
+        self.__reporter.mark_declared()
         return pub
 
     def subscribe(
@@ -765,6 +808,7 @@ class Node:
         task = self.__loop.create_task(sub._consume(), name=f"{self.name}:sub:{key}")
         sub._attach(inner, task)
         self.__subscriptions.append(sub)
+        self.__reporter.mark_declared()
         return sub
 
     def serve(
@@ -781,6 +825,7 @@ class Node:
         inner = self.session.declare_queryable(key, server._zenoh_callback)
         server._attach(inner)
         self.__servers.append(server)
+        self.__reporter.mark_declared()
         return server
 
     async def call(self, service: Service[Req, Rep], request: Req, *, timeout: float = 2.0) -> Rep:
@@ -865,50 +910,6 @@ class Node:
                 missing = ", ".join(sorted(wanted - alive))
                 raise TimeoutError(f"nodes not present after {timeout}s: {missing}")
             await asyncio.sleep(poll)
-
-    # ----------------------------------------------------------------- health
-
-    def _publish_health(self) -> None:
-        if self.__health_pub is None:
-            return
-        ages = [s.age for s in self.__subscriptions]
-        handlers = [s.handler_time for s in self.__subscriptions]
-        handlers += [srv.handler_time for srv in self.__servers]
-        age_mean_ms, age_max_ms = summarize(ages)
-        handler_mean_ms, handler_max_ms = summarize(handlers)
-        self.__health_pub.put(
-            NodeHealth(
-                node=self.name,
-                state=self.__state,
-                uptime_s=time.monotonic() - self.__started_monotonic,
-                sent=sum(p.sent for p in self.__publishers),
-                received=sum(s.received for s in self.__subscriptions),
-                dropped=sum(s.dropped for s in self.__subscriptions),
-                stale=sum(s.stale for s in self.__subscriptions),
-                handler_errors=sum(s.errors for s in self.__subscriptions)
-                + sum(srv.errors for srv in self.__servers)
-                + sum(t.errors for t in self.__timers)
-                + sum(p.errors for p in self.__publishers),
-                timer_overruns=sum(t.overruns for t in self.__timers),
-                deadline_misses=sum(s.deadline_misses for s in self.__subscriptions),
-                logs_dropped=self.__log_handler.dropped if self.__log_handler else 0,
-                shm_fallbacks=self.__shm.fallbacks,
-                cpu_percent=self.__process.cpu_percent(),
-                rss_bytes=self.__process.rss_bytes(),
-                queue_max_depth=max((s.queue_peak for s in self.__subscriptions), default=0),
-                age_mean_ms=age_mean_ms,
-                age_max_ms=age_max_ms,
-                handler_mean_ms=handler_mean_ms,
-                handler_max_ms=handler_max_ms,
-                ts_ns=time.time_ns(),
-            )
-        )
-        # Latency is windowed: each heartbeat covers the interval since the
-        # last, so one startup spike cannot dominate the number for hours.
-        for accumulator in (*ages, *handlers):
-            accumulator.reset()
-        for subscription in self.__subscriptions:
-            subscription.queue_peak = 0
 
 
 async def _amain(node: Node) -> None:

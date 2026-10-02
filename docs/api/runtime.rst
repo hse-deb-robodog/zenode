@@ -9,6 +9,11 @@ zenode.node
 
 .. automodule:: zenode.node
 
+zenode.reporting
+----------------
+
+.. automodule:: zenode.reporting
+
 zenode.declarative
 ------------------
 

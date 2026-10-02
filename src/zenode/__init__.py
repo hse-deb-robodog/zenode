@@ -27,7 +27,9 @@ from .config import (
 )
 from .declarative import (
     Binding,
+    Measurement,
     every,
+    metric,
     on_matching,
     on_resume,
     on_silence,
@@ -73,6 +75,7 @@ __all__ = [
     "ContractError",
     "DuplicateNodeError",
     "Envelope",
+    "Measurement",
     "Node",
     "NodeConfig",
     "OnDeadline",
@@ -101,6 +104,7 @@ __all__ = [
     "load_node_config",
     "load_section",
     "load_transport_config",
+    "metric",
     "on_matching",
     "on_resume",
     "on_silence",

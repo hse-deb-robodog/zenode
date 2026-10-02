@@ -53,7 +53,8 @@ makes `zenode topics` and typed `zenode echo` possible, and it is why tests that
 registry *contents* use the `isolated_registry` fixture. Keys are relative; the deployment
 namespace is prefixed at runtime by `resolve_key`. `Topic.absolute()` opts out.
 
-**The runtime** (`node.py`, `pubsub.py`, `service.py`, `timers.py`, `presence.py`, `shm.py`).
+**The runtime** (`node.py`, `reporting.py`, `pubsub.py`, `service.py`, `timers.py`,
+`presence.py`, `shm.py`).
 `Node.start()` has a load-bearing order: session → duplicate-name check → liveliness token →
 `publish()` descriptors materialized → log publishing → health timer → `on_start()` →
 `_wire_bindings()` → trace service. Publishers exist *before* `on_start` so it can use them;
@@ -69,6 +70,13 @@ an axis does not answer; only `expired()` tells the two apart. Neither helps aga
 is the answer and the docs say so. Nodes are single-use: `_stop_event` is latched, so `start()`
 refuses a node that has already run rather than coming up and exiting silently. Teardown bounds
 its task join by `shutdown_timeout` because cancellation cannot reach a thread inside `blocking()`.
+
+`reporting.py` is the **Reporter** — the single owner of the heartbeat and the latched
+descriptor. `Node` feeds it live sources at construction, `start()` attaches the two
+publishers, the health timer calls `beat()`, and the wiring methods call `mark_declared()`;
+the descriptor-republish protocol (retry after a failed publish, republish-once on a wiring
+change) lives entirely behind its interface. Like `topic.py` it imports no zenoh, which is
+what lets `test_reporting.py` construct it with fakes and no session.
 
 `declarative.py` decorators only stamp `__zenode_bindings__` metadata and return the function
 unchanged — handlers stay directly callable in tests. `collect_bindings`/`collect_publishers`
@@ -92,7 +100,8 @@ Every counter a subscription/timer/server keeps (`received`, `dropped`, `stale`,
 **Out-of-process tooling** (`cli.py`, `exporter.py`, `otlp_logs.py`, `otlp_metrics.py`). Nodes
 publish health/logs on the bus; `zenode export` is a sidecar that re-serves them for Prometheus
 pull or pushes OTLP. Nodes themselves never link a metrics SDK. `exporter.py`'s `COUNTERS`/`GAUGES`
-table is shared with `otlp_metrics.py` so pull and push can't drift apart.
+table and the `APP_PREFIX`/`OTLP_APP_PREFIX` pair are shared with `otlp_metrics.py` so pull and
+push can't drift apart.
 
 **Testing** (`testing.py`). `harness()` opens one peer-mode session with multicast off; zenoh
 routes matching pub/sub in-process, so typed round trips need no router. An internal `_Probe`
@@ -142,3 +151,17 @@ Docstrings in this codebase carry the *why* (trade-offs, failure modes, what bre
 not restatements of the signature. Match that when editing; the module docstrings are the fastest
 route into any file. `docs/` mirrors the same material for users — a behavior change usually
 means editing the matching page.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues (`hse-deb-robodog/zenode`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

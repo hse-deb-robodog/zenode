@@ -14,8 +14,12 @@ A **sidecar**, deliberately, rather than instruments inside each node:
 - The exposition format is a string join, so this costs no dependency at all.
   No protobuf, no gRPC, nothing compiled, on hardware where that matters.
 
-Cardinality is bounded by construction: one series set per live node, labelled
-only by node and namespace, both of which come from the contract.
+Cardinality is bounded by *declaration*: one series set per live node, labelled
+only by host, node and namespace. The runtime's own fields are a fixed table
+below; an application's :func:`~zenode.metric` measurements are fixed once its
+node class body has executed, which is what keeps them countable — a free
+``dict[str, float]`` keyed by detected-object id would not be, and the damage
+would land in someone else's time-series database.
 
 Only pull is implemented. A robot behind NAT cannot be scraped and wants OTLP
 push instead; that needs an SDK and an exporter, so it belongs behind the
@@ -24,6 +28,7 @@ push instead; that needs an SDK and an exporter, so it belongs behind the
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -31,8 +36,24 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .msgs.health import NodeHealth
+from .msgs.info import MeasureDescriptor, NodeInfo
+
+logger = logging.getLogger(__name__)
 
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+APP_PREFIX = "zenode_app_"
+"""Prefix for application measurements, keeping them clear of the runtime's own
+``zenode_node_`` names — so a field added to ``NodeHealth`` in a later release
+can never collide with someone's ``@metric``."""
+
+OTLP_APP_PREFIX = "zenode.app."
+"""The same namespace in OTLP's dotted spelling, used by the push path. A
+collector normalises ``zenode.app.battery_soc`` back to
+``zenode_app_battery_soc``, so both export paths land on one series. Defined
+beside :data:`APP_PREFIX` for the reason :data:`COUNTERS` is shared with
+``otlp_metrics``: two spellings of one namespace in two files is how they
+drift."""
 
 DEFAULT_STALE_AFTER = 60.0
 """Seconds without a heartbeat before a node's series are dropped entirely.
@@ -241,16 +262,104 @@ def _escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def _labels(namespace: str, node: str, **extra: str) -> str:
+def _labels(namespace: str, node: str, host: str = "", **extra: str) -> str:
     pairs = {"namespace": namespace, "node": node, **extra}
+    # An empty host is omitted rather than emitted as host="": a node published
+    # by an older zenode has no host, and `host=""` would read as one.
+    if host:
+        pairs["host"] = host
     return ",".join(f'{key}="{_escape(value)}"' for key, value in sorted(pairs.items()))
 
 
-def _format(value: float) -> str:
-    # Integers print without a trailing .0 so counters read as counts; floats
-    # get six significant digits, because `6.0023076990000845` seconds of
-    # uptime is bytes on every scrape in exchange for nothing.
+def format_value(value: float) -> str:
+    """One number, rendered for a human or a scraper. Shared with ``zenode health``.
+
+    Integers print in full and without a trailing ``.0``, so a counter reads as
+    a count: ``%g`` alone would turn 1204567 frames into ``1.20457e+06``, which
+    a 30 Hz camera reaches in nine hours and these nodes run for a week. Floats
+    get six significant digits, because ``6.0023076990000845`` seconds of uptime
+    is bytes on every scrape in exchange for nothing.
+    """
     return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
+
+
+def app_series_name(descriptor: MeasureDescriptor) -> str:
+    """The Prometheus series name for one measurement.
+
+    ``_total`` on counters, because that is the suffix a collector's
+    OTLP-to-Prometheus normalisation produces for a monotonic sum — the two
+    export paths have to land on one series name.
+    """
+    suffix = "_total" if descriptor.kind == "counter" else ""
+    return f"{APP_PREFIX}{descriptor.id}{suffix}"
+
+
+def _app_help(descriptor: MeasureDescriptor) -> str:
+    text = descriptor.description or f"Application measurement {descriptor.id}."
+    return f"{text} [{descriptor.unit}]" if descriptor.unit else text
+
+
+def app_descriptors(catalogs: dict[str, NodeInfo]) -> dict[str, MeasureDescriptor]:
+    """The exported descriptor per measure id, resolving disagreements.
+
+    One Prometheus name cannot carry two types. Where two nodes declare the same
+    id with a different ``kind``, the first node in sorted order wins and the
+    others' points are omitted by :func:`render` and
+    :func:`zenode.otlp_metrics.encode` alike — an arbitrary but *stable* rule,
+    which matters more than which one wins, because a series whose type flips
+    between scrapes is worse than a missing one. Pure resolution only: an id
+    meant to mean the same thing fleet-wide declared with two kinds is a
+    deployment mistake, and reporting it needs a memory, which belongs to
+    :meth:`Registry.snapshot` rather than a formatter.
+    """
+    chosen: dict[str, MeasureDescriptor] = {}
+    for node in sorted(catalogs):
+        for descriptor in catalogs[node].measures:
+            chosen.setdefault(descriptor.id, descriptor)
+    return chosen
+
+
+def render_app(
+    live: list[tuple[str, Sample]], namespace: str, catalogs: dict[str, NodeInfo]
+) -> list[str]:
+    """Application measurements, as exposition lines.
+
+    A value whose node has published no descriptor for it is omitted rather than
+    guessed at: latched delivery makes that gap transient, and a series whose
+    ``TYPE`` flips mid-history is worse than a short hole.
+
+    ``catalogs`` must already be joined to the live rows, which
+    :meth:`Registry.snapshot` guarantees. ``Registry.offer_info`` keeps a
+    descriptor after its node dies, so a stale catalog reaching this far could
+    win :func:`app_descriptors`' sorted-first tie-break and take a live node's
+    series off ``/metrics``.
+    """
+    if not catalogs:
+        return []
+    declared = {node: {d.id: d for d in info.measures} for node, info in catalogs.items()}
+    chosen = app_descriptors(catalogs)
+    lines: list[str] = []
+    for measure_id in sorted(chosen):
+        descriptor = chosen[measure_id]
+        points = [
+            (name, sample.health.host, sample.health.measures[measure_id])
+            for name, sample in live
+            if measure_id in sample.health.measures
+            # `declared[name]` must have it: a value from a node whose own
+            # descriptor has not arrived says nothing about its type.
+            and declared.get(name, {}).get(measure_id) is not None
+            and declared[name][measure_id].kind == descriptor.kind
+        ]
+        if not points:
+            continue
+        name = app_series_name(descriptor)
+        lines.append(f"# HELP {name} {_app_help(descriptor)}")
+        lines.append(f"# TYPE {name} {descriptor.kind}")
+        lines.extend(
+            f"{name}{{{_labels(namespace, node, host)}}} {format_value(value)}"
+            for node, host, value in points
+        )
+    return lines
 
 
 def render_self(stats: dict[str, dict[str, int]]) -> list[str]:
@@ -272,36 +381,39 @@ def render(
     namespace: str,
     *,
     now: float,
-    stale_after: float = DEFAULT_STALE_AFTER,
     self_stats: dict[str, dict[str, int]] | None = None,
+    catalogs: dict[str, NodeInfo] | None = None,
 ) -> str:
-    """The full exposition, as one string. Pure — no clock, no socket.
+    """The full exposition, as one string. Pure — no clock, no socket, no filter.
 
-    Nodes not heard from in ``stale_after`` seconds are omitted entirely, so
-    their series go absent rather than freezing at their last value and reading
-    as a healthy node that stopped doing anything.
+    ``samples`` are taken to *be* the live set: deciding which nodes still count
+    happens once, in :meth:`Registry.snapshot`, for every export path. ``now``
+    only ages the heartbeats for ``zenode_node_last_seen_seconds``.
+
+    ``catalogs`` are the nodes' :class:`~zenode.msgs.info.NodeInfo` descriptors,
+    which supply the ``TYPE`` and ``HELP`` for their ``@metric`` measurements —
+    without one for a node, that node contributes no ``zenode_app_`` series.
     """
-    live = sorted(
-        (name, sample) for name, sample in samples.items() if now - sample.at <= stale_after
-    )
+    live = sorted(samples.items())
     lines: list[str] = []
 
     lines.append("# HELP zenode_node_info Node identity and lifecycle state.")
     lines.append("# TYPE zenode_node_info gauge")
     for name, sample in live:
-        lines.append(f"zenode_node_info{{{_labels(namespace, name, state=sample.health.state)}}} 1")
+        labels = _labels(namespace, name, sample.health.host, state=sample.health.state)
+        lines.append(f"zenode_node_info{{{labels}}} 1")
 
     lines.append("# HELP zenode_node_last_seen_seconds Age of this node's newest heartbeat.")
     lines.append("# TYPE zenode_node_last_seen_seconds gauge")
     for name, sample in live:
         lines.append(
-            f"zenode_node_last_seen_seconds{{{_labels(namespace, name)}}} "
-            f"{_format(round(now - sample.at, 3))}"
+            f"zenode_node_last_seen_seconds{{{_labels(namespace, name, sample.health.host)}}} "
+            f"{format_value(round(now - sample.at, 3))}"
         )
 
     for metric in (*COUNTERS, *GAUGES):
         rendered = [
-            (name, value)
+            (name, sample.health.host, value)
             for name, sample in live
             if (value := metric.value(sample.health)) is not None
         ]
@@ -310,9 +422,11 @@ def render(
         lines.append(f"# HELP zenode_node_{metric.name} {metric.help}")
         lines.append(f"# TYPE zenode_node_{metric.name} {metric.kind}")
         lines.extend(
-            f"zenode_node_{metric.name}{{{_labels(namespace, name)}}} {_format(value)}"
-            for name, value in rendered
+            f"zenode_node_{metric.name}{{{_labels(namespace, name, host)}}} {format_value(value)}"
+            for name, host, value in rendered
         )
+
+    lines.extend(render_app(live, namespace, catalogs or {}))
 
     if self_stats:
         lines.extend(render_self(self_stats))
@@ -321,7 +435,10 @@ def render(
 
 
 class Registry:
-    """Latest heartbeat per node. Written from a zenoh thread, read by HTTP."""
+    """Latest heartbeat and descriptor per node.
+
+    Written from a zenoh thread, read by HTTP.
+    """
 
     def __init__(self, namespace: str, *, stale_after: float = DEFAULT_STALE_AFTER) -> None:
         self.namespace = namespace
@@ -329,6 +446,12 @@ class Registry:
         self.self_stats: Callable[[], dict[str, dict[str, int]]] | None = None
         """Set by the caller to also publish the exporter's own counters."""
         self._samples: dict[str, Sample] = {}
+        self._catalogs: dict[str, NodeInfo] = {}
+        self._kind_conflicts_logged: set[str] = set()
+        """Measure ids already reported as declared with two different kinds.
+        Bounded by the number of declared ids, and it exists so a scrape every
+        15 seconds does not turn one deployment mistake into a log every 15
+        seconds."""
         self._lock = threading.Lock()
 
     def offer(self, payload: bytes) -> None:
@@ -345,29 +468,77 @@ class Registry:
         with self._lock:
             self._samples[health.node] = Sample(health, time.monotonic())
 
-    def snapshot(self) -> dict[str, Sample]:
-        """Every node heard from recently enough to still count.
+    def offer_info(self, payload: bytes) -> None:
+        """Accept a node descriptor; ignore anything that is not one.
 
-        Shared by both export paths, so a scrape and a push made a moment apart
-        report the same nodes.
+        Kept even when the node goes stale, unlike a sample: the descriptor is
+        static, and a node that restarts republishes it before its first
+        heartbeat arrives anyway. Bounded by the number of nodes that have ever
+        been seen, which is the same bound the samples carry.
+        """
+        try:
+            info = NodeInfo.model_validate_json(payload)
+        except ValueError:
+            return
+        with self._lock:
+            self._catalogs[info.node] = info
+
+    def snapshot(self) -> tuple[dict[str, Sample], dict[str, NodeInfo]]:
+        """Every node heard from recently enough to still count, and its catalog.
+
+        The **only** place liveness is decided. Both under one lock, and shared
+        by both export paths, so a scrape and a push made a moment apart report
+        the same nodes and the same types. A stale node's series go absent
+        rather than freezing at their last value and reading as a healthy node
+        that stopped doing anything.
+
+        Kind conflicts are reported here too: every export funnels through this
+        method, so the once-only warning holds however many paths are wired up.
         """
         now = time.monotonic()
         with self._lock:
-            return {
+            samples = {
                 name: sample
                 for name, sample in self._samples.items()
                 if now - sample.at <= self.stale_after
             }
+            catalogs = {n: self._catalogs[n] for n in samples if n in self._catalogs}
+        self._warn_kind_conflicts(catalogs)
+        return samples, catalogs
+
+    def _warn_kind_conflicts(self, catalogs: dict[str, NodeInfo]) -> None:
+        """Log each measure id declared with two kinds — once per registry.
+
+        Phrased against :func:`app_descriptors`' output so the warning can never
+        disagree with what the formatters actually export. Runs on the live
+        catalog set only: a node decommissioned an hour ago must neither win the
+        resolution nor burn the once-only warning on a conflict nobody can see.
+        """
+        chosen = app_descriptors(catalogs)
+        for node in sorted(catalogs):
+            for descriptor in catalogs[node].measures:
+                first = chosen[descriptor.id]
+                if first.kind == descriptor.kind or descriptor.id in self._kind_conflicts_logged:
+                    continue
+                self._kind_conflicts_logged.add(descriptor.id)
+                logger.warning(
+                    "measurement %r is declared as %s by one node and %s by %r; "
+                    "exporting the first and omitting the rest — an id must mean "
+                    "the same thing fleet-wide",
+                    descriptor.id,
+                    first.kind,
+                    descriptor.kind,
+                    node,
+                )
 
     def render(self) -> str:
-        with self._lock:
-            samples = dict(self._samples)
+        samples, catalogs = self.snapshot()
         return render(
             samples,
             self.namespace,
             now=time.monotonic(),
-            stale_after=self.stale_after,
             self_stats=self.self_stats() if self.self_stats else None,
+            catalogs=catalogs,
         )
 
     def __len__(self) -> int:
