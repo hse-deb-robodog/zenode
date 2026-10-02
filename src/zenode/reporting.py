@@ -29,6 +29,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import BaseModel
+
 from .metrics import Latency, ProcessStats, summarize
 from .msgs.health import RUNTIME_MEASURES, NodeHealth, NodeState
 from .msgs.info import EntityInfo, NodeInfo, ServiceInfo
@@ -45,8 +47,9 @@ def _entity_info(topic: Topic[Any], key: str) -> EntityInfo:
 
 def _json_schema(model: type[Any]) -> dict[str, Any]:
     """``model_json_schema()`` where there is one; ``{}`` for ``bytes``."""
-    schema = getattr(model, "model_json_schema", None)
-    return schema() if callable(schema) else {}
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        return model.model_json_schema()
+    return {}
 
 
 def _service_info(service: Service[Any, Any], key: str) -> ServiceInfo:

@@ -35,7 +35,7 @@ run(Nav)
 
 | Attribute | Default | Effect |
 |---|---|---|
-| `name` | — | Required. Identifies the node on the network and in logs. |
+| `name` | — | Required. Identifies the node on the network and in logs. One segment matching `[A-Za-z0-9_.-]+`: it becomes part of every reserved key and, for diagnostics, a URL path. |
 | `health_interval` | `2.0` | Seconds between health heartbeats. `None` disables. |
 | `start_timeout` | `30.0` | Seconds `on_start` may take before the node tears down and raises `StartTimeout`. `None` waits indefinitely. |
 | `shutdown_timeout` | `5.0` | Seconds teardown waits for cancelled background tasks. Overstayers are named in a warning. |
@@ -296,8 +296,11 @@ The rules that matter in a body:
 
 Unit, kind and description travel separately, on the latched
 `<ns>/node/<name>/info` descriptor, so they are not repeated at the heartbeat
-rate. `zenode health` prints the values under its table and `zenode export`
-exports them as `zenode_app_<id>`; see
+rate. The same descriptor describes the heartbeat's own fields (`runtime`),
+carries the node's `health_interval` so a consumer can tell silence from a
+slow node, and lists each served service with its JSON schemas and
+`diagnostic` flag. `zenode health` prints the values under its table and
+`zenode export` exports them as `zenode_app_<id>`; see
 [Observability](open-telemetry.md#application-metrics) for the export detail and
 for where the line between a measurement and a read-only service falls.
 

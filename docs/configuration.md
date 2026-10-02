@@ -84,7 +84,7 @@ timestamping = true
 | `mode` | `peer` | `peer` discovers others directly; `client` connects to a router. |
 | `connect` | `[]` | Endpoints to dial. |
 | `listen` | `[]` | Endpoints to accept on. |
-| `namespace` | `""` | Prefixed to every relative key. |
+| `namespace` | `""` | Prefixed to every relative key. Segments separated by `/`, each matching `[A-Za-z0-9_.-]+`; `fleet/robot1` is fine, `fleet/*` is rejected at load. |
 | `host` | `""` | The machine a node reports running on. Empty means `socket.gethostname()`. |
 | `multicast_scouting` | `true` | Automatic discovery on a LAN. |
 | `shared_memory` | `false` | See [Shared memory](shared-memory.md). |

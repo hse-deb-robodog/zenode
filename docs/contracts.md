@@ -131,10 +131,22 @@ GET_MAP = Service("nav/get_map", request=MapRequest, reply=CostMap)
 | `key` | — | Hierarchical key, relative to the namespace. |
 | `request` / `reply` | — | Payload types. |
 | `request_codec` / `reply_codec` | derived | Wire formats. |
+| `description` | `""` | One line for humans, published on the node's descriptor. |
+| `diagnostic` | `None` | `"read"`: callable by a diagnostic client as a side-effect-free data resource; needs a request with no fields (`zenode.msgs.Empty`). `"operation"`: an action, never reachable by GET. `None`: not exposed. |
 
 A handler that raises produces a structured error reply, so the caller receives
 a `ServiceError` carrying the message rather than a silent timeout. No server
 produces `ServiceTimeout`.
+
+`diagnostic` is how a service opts into the
+[OpenSOVD sidecar](design/opensovd-adapter.md). The default is off: what a
+robot shows a diagnostic client is decided here, in the contract, not in the
+sidecar's configuration.
+
+```python
+GET_POSE = Service("state/get_pose", request=Empty, reply=Pose, diagnostic="read")
+HOME = Service("motion/home", request=AxisId, reply=Ack, diagnostic="operation")
+```
 
 Services are for questions with answers: fetch a map, query a parameter, run a
 calibration. A value that changes continuously belongs on a topic, where late

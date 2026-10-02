@@ -19,7 +19,7 @@
 - Runtime descriptor ids equal `NodeHealth` field names. The exporter keeps its `_total` suffix as a rendering rule.
 - Docstrings carry the *why*, matching the surrounding files. Every behavior change edits the matching `docs/` page.
 - Checks that must pass before the final commit: `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format src tests examples`, `uv run pyright`, `uv run ty check src tests`, `uv run sphinx-build -W -b html docs docs/_build/html`.
-- Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Commit messages are one short subject line in the repo's `type(scope): summary` style, no body, no attribution.
 
 ---
 
@@ -49,28 +49,22 @@
 
 The toctree in `docs/index.md` now lists `design/opensovd-core-reuse`, so the reuse note must be committed with it or the `-W` docs build fails. The untracked `.html`/`.png` diagrams stay untracked: the sidecar diagram still shows `read_only` and `--contract`, which the decided design dropped.
 
-- [ ] **Step 1: Create the branch off `dev`**
+- [x] **Step 1: Create the branch off `dev`**
 
 ```bash
 git switch -c feat/sovd-runtime
 ```
 
-- [ ] **Step 2: Verify the docs build passes with the reuse note present**
+- [x] **Step 2: Verify the docs build passes with the reuse note present**
 
 Run: `uv run sphinx-build -W -b html docs docs/_build/html 2>&1 | tail -1`
 Expected: `build succeeded.`
 
-- [ ] **Step 3: Commit the design**
+- [x] **Step 3: Commit the design**
 
 ```bash
 git add docs/design/opensovd-adapter.md docs/design/live-topics.md docs/design/zenoh-storage-for-sovd.md docs/design/opensovd-core-reuse.md docs/index.md
-git commit -m "docs: decide the OpenSOVD adapter design
-
-Route A, a read-only pure-Python sidecar that discovers everything from the
-latched NodeInfo descriptor. Records the five runtime changes it needs and
-promotes the opensovd-core reuse note out of orphan status.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "docs: decide the OpenSOVD adapter design"
 ```
 
 ---
@@ -85,7 +79,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `zenode.msgs.Empty` — a pydantic `BaseModel` with no fields and `extra="forbid"`. Task 2's validation names it in its error message.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/test_msgs_empty.py
@@ -119,12 +113,12 @@ def test_empty_round_trips_as_an_empty_object():
     assert Empty().model_dump_json() == "{}"
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `uv run pytest tests/test_msgs_empty.py -q`
 Expected: FAIL, `ImportError: cannot import name 'Empty' from 'zenode.msgs'`
 
-- [ ] **Step 3: Write the model**
+- [x] **Step 3: Write the model**
 
 ```python
 # src/zenode/msgs/empty.py
@@ -157,18 +151,16 @@ from .empty import Empty
 
 and `"Empty",` as the first `__all__` entry (it sorts before `"EntityInfo"`).
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `uv run pytest tests/test_msgs_empty.py -q`
 Expected: 3 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/msgs/empty.py src/zenode/msgs/__init__.py tests/test_msgs_empty.py
-git commit -m "feat(msgs): add Empty, the field-less request model
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(msgs): add Empty, the field-less request model"
 ```
 
 ---
@@ -183,7 +175,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Consumes: `zenode.msgs.Empty` from Task 1 (tests only — `topic.py` must not import `msgs`, which imports `topic`).
 - Produces: `zenode.topic.Diagnostic = Literal["read", "operation"]`, `DIAGNOSTICS: tuple[Diagnostic, ...]`, and `Service.diagnostic: Diagnostic | None = None`. Task 5 copies `service.diagnostic` onto `ServiceInfo`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_topic.py`:
 
@@ -230,12 +222,12 @@ def test_an_unknown_diagnostic_is_a_contract_error():
 
 Check the file's existing imports: it must have `pytest`, `BaseModel`, `Service`, `ContractError` and the `Msg` model. If `ContractError` is not imported, add `from zenode import ContractError` (it is re-exported from `zenode`).
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_topic.py -q -k "diagnos or read or operation"`
 Expected: FAIL with `TypeError: Service.__init__() got an unexpected keyword argument 'diagnostic'`
 
-- [ ] **Step 3: Add the field and its validation**
+- [x] **Step 3: Add the field and its validation**
 
 In `src/zenode/topic.py`, after `CONGESTION_CONTROLS` add:
 
@@ -314,21 +306,16 @@ class Service(Generic[Req, Rep]):
 
 Export the new names: in `src/zenode/__init__.py`, the `from .topic import (...)` block and `__all__` both list topic names (e.g. `Priority`, `PRIORITIES`); add `Diagnostic` and `DIAGNOSTICS` beside them, keeping each list sorted the way the file already sorts it.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_topic.py -q`
 Expected: all pass, including the five new ones
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/topic.py src/zenode/__init__.py tests/test_topic.py
-git commit -m "feat(contract): Service.diagnostic marks a service read, operation or hidden
-
-A read must take a field-less request, validated in the dataclass, because a
-SOVD data resource is a GET with no body.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(contract): Service.diagnostic marks a service read, operation or hidden"
 ```
 
 ---
@@ -344,7 +331,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `zenode.topic.validate_node_name(name: str, *, what: str) -> None` and `zenode.topic.validate_namespace(namespace: str, *, what: str) -> None`, both raising `ContractError`. `NAME_SEGMENT: re.Pattern[str]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_topic.py`:
 
@@ -409,12 +396,12 @@ def test_the_transport_namespace_is_validated():
         TransportConfig(namespace="fleet/*")
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_topic.py tests/test_node_lifecycle.py tests/test_config.py -q -k "name or namespace"`
 Expected: `ImportError` for the validators in `test_topic.py`; the node and config tests fail because no error is raised.
 
-- [ ] **Step 3: Add the validators**
+- [x] **Step 3: Add the validators**
 
 In `src/zenode/topic.py`, add `import re` to the imports and, directly after `_validate_key`:
 
@@ -498,24 +485,16 @@ with `from .errors import ConfigError, ContractError`.
 
 Check for an import cycle: `topic.py` imports `codec` and `errors`; `config.py` imports `errors` and now `topic`. `codec.py` must not import `config` — confirm with `grep -n "^from\|^import" src/zenode/codec.py`.
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `uv run pytest -q`
 Expected: all pass. If an existing test uses a name or namespace the regex rejects, the failure names it; the regex is the spec, so change the test's fixture string, not the regex.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/zenode/topic.py src/zenode/node.py src/zenode/config.py tests/test_topic.py tests/test_node_lifecycle.py tests/test_config.py
-git commit -m "feat!: validate node names and namespace segments
-
-A name is a segment of every reserved key and, for diagnostics, a URL path
-segment. 'arm/left' passed key validation and mis-parsed in
-node_name_from_key; wildcards and URL delimiters were legal too.
-
-BREAKING CHANGE: names must match ^[A-Za-z0-9_.-]+$ and may not contain '/'.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat!: validate node names and namespace segments"
 ```
 
 ---
@@ -532,7 +511,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Consumes: `MeasureDescriptor` from `zenode.msgs.info`.
 - Produces: `zenode.msgs.health.RUNTIME_MEASURES: tuple[MeasureDescriptor, ...]` and `RUNTIME_BY_ID: dict[str, MeasureDescriptor]`. `exporter.Metric` keeps the attributes `name`, `kind`, `help`, `value`, `otlp`, `unit`, `integral` (the first three and `integral` now derived from `descriptor`). Task 5 puts `RUNTIME_MEASURES` on `NodeInfo.runtime`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_runtime_measures.py
@@ -601,12 +580,12 @@ def test_deadline_misses_are_exported():
 
 Adapt `_render_one` to whatever helper the module actually uses to build a registry with one `NodeHealth` and render it — the test at line 62 (`test_labels_carry_node_and_namespace`) shows it.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_runtime_measures.py tests/test_exporter.py -q`
 Expected: `ImportError: cannot import name 'RUNTIME_BY_ID'`; the exporter test fails on the missing series.
 
-- [ ] **Step 3: Add the catalog to `msgs/health.py`**
+- [x] **Step 3: Add the catalog to `msgs/health.py`**
 
 Append to `src/zenode/msgs/health.py` (import `MeasureDescriptor` from `.info` at the top; `info.py` does not import `health.py`, so there is no cycle):
 
@@ -692,7 +671,7 @@ Run `uv run ruff format src` afterwards; the layout above is illustrative.
 
 Export from `src/zenode/msgs/__init__.py`: add `RUNTIME_MEASURES` to the `.health` import and to `__all__`.
 
-- [ ] **Step 4: Make `exporter.Metric` read from the catalog**
+- [x] **Step 4: Make `exporter.Metric` read from the catalog**
 
 In `src/zenode/exporter.py`, import `RUNTIME_BY_ID` from `.msgs.health` and replace the `Metric` dataclass with:
 
@@ -769,24 +748,16 @@ GAUGES: tuple[Metric, ...] = (
 
 The three descriptions that the old table worded differently from the health docstrings (`handler_errors`, `timer_overruns`, `deadline_misses`) are now the catalog's; `tests/test_exporter.py::test_counters_and_gauges_are_typed` asserts on `sent_total`'s help, which is unchanged.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `uv run pytest tests/test_runtime_measures.py tests/test_exporter.py tests/test_otlp_metrics.py tests/test_cli_health.py -q`
 Expected: all pass. If `test_otlp_metrics.py` counts metrics per resource, the count grows by one for `deadline_misses`; update that expected number.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/zenode/msgs/health.py src/zenode/msgs/__init__.py src/zenode/exporter.py tests/test_runtime_measures.py tests/test_exporter.py tests/test_otlp_metrics.py
-git commit -m "feat(msgs): describe the heartbeat's own fields in one catalog
-
-RUNTIME_MEASURES is a MeasureDescriptor per numeric NodeHealth field, ids
-equal to the field names. The exporter's Metric rows read kind, help and
-integral from it and keep only the series names and unit conversion, so a
-third consumer reads the catalog off the bus and needs no table. Also adds
-the deadline_misses series the old table lacked.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(msgs): describe the heartbeat's own fields in one catalog"
 ```
 
 ---
@@ -803,7 +774,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Consumes: `Service.diagnostic` (Task 2), `RUNTIME_MEASURES` (Task 4).
 - Produces: `ServiceInfo.diagnostic: Diagnostic | None`, `ServiceInfo.description: str`, `ServiceInfo.request_schema: dict[str, Any]`, `ServiceInfo.reply_schema: dict[str, Any]`, `ServiceInfo.request_encoding: str`, `ServiceInfo.reply_encoding: str`; `NodeInfo.runtime: list[MeasureDescriptor]`, `NodeInfo.health_interval: float | None`; `ReporterSources.health_interval: float | None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_reporting.py` (it defines `SUM`, `_FakeServer`, `sources()` and `reporter()`; add `from zenode.msgs import Empty` and `from zenode.msgs.health import RUNTIME_MEASURES` to its imports):
 
@@ -858,12 +829,12 @@ def test_the_descriptor_carries_the_health_interval():
 
 Also add `"health_interval": 2.0,` to the `defaults` dict in `sources()`.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_reporting.py -q`
 Expected: the new tests fail — `ReporterSources.__init__() got an unexpected keyword argument 'health_interval'` makes every test in the module fail until Step 3 lands, which is expected.
 
-- [ ] **Step 3: Extend the messages**
+- [x] **Step 3: Extend the messages**
 
 In `src/zenode/msgs/info.py`, add `from typing import Any, Literal` and `from ..topic import Diagnostic, resolve_key`, then replace `ServiceInfo` and extend `NodeInfo`:
 
@@ -906,7 +877,7 @@ In `NodeInfo`, after `measures` add:
     uses."""
 ```
 
-- [ ] **Step 4: Build them in the reporter and feed the interval from the node**
+- [x] **Step 4: Build them in the reporter and feed the interval from the node**
 
 In `src/zenode/reporting.py`, import `RUNTIME_MEASURES` from `.msgs.health` and add `health_interval: float | None` to `ReporterSources` after `zenode_version`, documented:
 
@@ -943,23 +914,16 @@ and in `build_info` replace the inline `ServiceInfo(...)` comprehension with `se
 
 In `src/zenode/node.py`, in the `ReporterSources(...)` call add `health_interval=self.health_interval,` after `zenode_version=__version__,`.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `uv run pytest tests/test_reporting.py tests/test_info.py tests/test_integration.py -q`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/zenode/msgs/info.py src/zenode/reporting.py src/zenode/node.py tests/test_reporting.py
-git commit -m "feat(info): descriptor carries service schemas, the runtime catalog and the health interval
-
-ServiceInfo gains diagnostic, description, both JSON schemas and both wire
-encodings; NodeInfo gains runtime (RUNTIME_MEASURES) and health_interval. A
-consumer that never imports the contract now has everything it needs to
-list, call and judge a node.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(info): descriptor carries service schemas, the runtime catalog and the health interval"
 ```
 
 ---
@@ -972,7 +936,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `docs/configuration.md:87` (namespace row)
 - Modify: `docs/open-telemetry.md` (wherever the `zenode_node_*` series are listed — find with `grep -n logs_dropped docs/open-telemetry.md`)
 
-- [ ] **Step 1: Document `diagnostic` and `Empty` in `docs/contracts.md`**
+- [x] **Step 1: Document `diagnostic` and `Empty` in `docs/contracts.md`**
 
 In the Service parameter table add two rows after `request_codec / reply_codec`:
 
@@ -994,7 +958,7 @@ HOME     = Service("motion/home", request=AxisId, reply=Ack, diagnostic="operati
 ```
 ```
 
-- [ ] **Step 2: Document the name rule and the descriptor fields in `docs/nodes.md`**
+- [x] **Step 2: Document the name rule and the descriptor fields in `docs/nodes.md`**
 
 Change the `name` row of the class attributes table to:
 
@@ -1016,7 +980,7 @@ slow node, and lists each served service with its JSON schemas and
 for where the line between a measurement and a read-only service falls.
 ```
 
-- [ ] **Step 3: Document the namespace rule in `docs/configuration.md`**
+- [x] **Step 3: Document the namespace rule in `docs/configuration.md`**
 
 Change the `namespace` row to:
 
@@ -1024,11 +988,11 @@ Change the `namespace` row to:
 | `namespace` | `""` | Prefixed to every relative key. Segments separated by `/`, each matching `[A-Za-z0-9_.-]+`; `fleet/robot1` is fine, `fleet/*` is rejected at load. |
 ```
 
-- [ ] **Step 4: Add `deadline_misses_total` to the exporter's series list in `docs/open-telemetry.md`**
+- [x] **Step 4: Add `deadline_misses_total` to the exporter's series list in `docs/open-telemetry.md`**
 
 Run `grep -n "logs_dropped" docs/open-telemetry.md`. Where the node series are listed, add `zenode_node_deadline_misses_total` with the help text "Subscriptions that went silent past their deadline." in the same format as its neighbours. If the list is a table with an OTLP column, the OTLP name is `zenode.node.deadline_misses`.
 
-- [ ] **Step 5: Run every check**
+- [x] **Step 5: Run every check**
 
 ```bash
 uv run ruff format src tests examples
@@ -1043,14 +1007,12 @@ Expected: ruff clean, pyright and ty report 0 errors, pytest all passed, `build 
 
 If pyright objects to `Diagnostic | None` on a frozen dataclass default or to the `getattr(..., "model_fields")` narrowing, annotate the local (`fields: dict[str, Any] | None = getattr(...)`) rather than adding an ignore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/contracts.md docs/nodes.md docs/configuration.md docs/open-telemetry.md
 git add -u src tests
-git commit -m "docs: diagnostic services, name rules, and the richer descriptor
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "docs: diagnostic services, name rules, and the richer descriptor"
 ```
 
 ---

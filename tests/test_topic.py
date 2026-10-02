@@ -155,8 +155,9 @@ def test_an_operation_may_take_arguments():
 
 
 def test_an_unknown_diagnostic_is_a_contract_error():
+    bad: Any = "write"  # the Literal is for checkers; the dataclass still guards at runtime
     with pytest.raises(ContractError, match="diagnostic"):
-        Service("x/y", request=_NoFields, reply=Msg, diagnostic="write")  # type: ignore[arg-type]
+        Service("x/y", request=_NoFields, reply=Msg, diagnostic=bad)
 
 
 # --------------------------------------------------------------- names and namespaces

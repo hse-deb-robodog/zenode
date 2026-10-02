@@ -172,7 +172,7 @@ Discards are reported as `NodeHealth.logs_dropped` and flagged by
 |------------|-------------------------------------------------------------------------|
 | Identity   | `node`, `host`, `state`                                                 |
 | Traffic    | `sent`, `received`                                                      |
-| Errors     | `handler_errors`                                                        |
+| Errors     | `handler_errors`, `deadline_misses`                                     |
 | Saturation | `dropped`, `stale`, `timer_overruns`, `queue_max_depth`, `logs_dropped`, `shm_fallbacks` |
 | Latency    | `age_mean_ms`, `age_max_ms`, `handler_mean_ms`, `handler_max_ms`        |
 | Resources  | `cpu_percent`, `rss_bytes`                                              |
