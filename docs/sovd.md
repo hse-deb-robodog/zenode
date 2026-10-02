@@ -67,6 +67,35 @@ not advertised; a SOVD client discovers that from the component itself.
 | the handler raised, or replied with something that is not JSON | 502 `error-response` |
 | more than `--max-calls` calls in flight | 503 `sovd-server-failure` |
 
+## Trying it with the OpenSOVD MCP server
+
+OpenSOVD ships `opensovd-mcp`, a Model Context Protocol server over any SOVD
+endpoint, so an AI assistant can ask a robot about itself. It takes one flag,
+`--url`, whose default is `http://localhost:7690/sovd/v1` — where `zenode sovd`
+serves by default.
+
+```bash
+# terminal 1: a node and the sidecar
+uv run python examples/talker.py
+uv run zenode sovd --connect tcp/127.0.0.1:17447
+
+# terminal 2: register the MCP server with Claude Code, from the container …
+claude mcp add --transport stdio --scope project sovd -- \
+    docker run -i --rm --network=host ghcr.io/eclipse-opensovd/opensovd-mcp \
+    --url http://127.0.0.1:7690/sovd/v1
+
+# … or from a build of the pinned opensovd-core checkout (it pins a nightly; stable works)
+cargo +stable build --release -p opensovd-mcp
+claude mcp add --transport stdio --scope project sovd -- \
+    ./target/release/opensovd-mcp --url http://127.0.0.1:7690/sovd/v1
+```
+
+At the pinned commit the MCP server exposes `list_components`, `list_areas`
+and `list_apps`, a `sovd://topology` resource and an `explore-topology`
+prompt. It reads discovery only: data items, measurements, service reads and
+`x-zenode-logs` are reachable with any HTTP client against the same URL, not
+through it yet.
+
 ## Security
 
 There is no authentication in the sidecar. It binds loopback by default; to
