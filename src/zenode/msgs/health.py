@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from ..topic import resolve_key
+from .info import MeasureDescriptor
 
 NodeState = Literal["starting", "running", "stopping", "stopped"]
 
@@ -103,3 +104,123 @@ class NodeHealth(BaseModel):
     executed, which is what keeps the exported series countable."""
 
     ts_ns: int
+
+
+RUNTIME_MEASURES: tuple[MeasureDescriptor, ...] = (
+    MeasureDescriptor(
+        id="uptime_s",
+        unit="s",
+        description="Time since this node started.",
+    ),
+    MeasureDescriptor(
+        id="sent",
+        unit="{message}",
+        kind="counter",
+        integral=True,
+        description="Messages published.",
+    ),
+    MeasureDescriptor(
+        id="received",
+        unit="{message}",
+        kind="counter",
+        integral=True,
+        description="Messages received.",
+    ),
+    MeasureDescriptor(
+        id="dropped",
+        unit="{message}",
+        kind="counter",
+        integral=True,
+        description="Messages dropped by a full queue.",
+    ),
+    MeasureDescriptor(
+        id="stale",
+        unit="{message}",
+        kind="counter",
+        integral=True,
+        description="Messages dropped past max_age.",
+    ),
+    MeasureDescriptor(
+        id="handler_errors",
+        unit="{error}",
+        kind="counter",
+        integral=True,
+        description="Exceptions raised inside subscription, service and timer handlers.",
+    ),
+    MeasureDescriptor(
+        id="timer_overruns",
+        unit="{overrun}",
+        kind="counter",
+        integral=True,
+        description="Timer deadlines missed because a body outran its interval.",
+    ),
+    MeasureDescriptor(
+        id="deadline_misses",
+        unit="{miss}",
+        kind="counter",
+        integral=True,
+        description="Subscriptions that went silent past their deadline.",
+    ),
+    MeasureDescriptor(
+        id="logs_dropped",
+        unit="{record}",
+        kind="counter",
+        integral=True,
+        description="Log records dropped before publishing, leaving `zenode logs` incomplete.",
+    ),
+    MeasureDescriptor(
+        id="shm_fallbacks",
+        unit="{message}",
+        kind="counter",
+        integral=True,
+        description="Messages on a shm=True topic that published through the normal path.",
+    ),
+    MeasureDescriptor(
+        id="cpu_percent",
+        unit="%",
+        description="Process CPU since the last heartbeat, as a percentage of one core.",
+    ),
+    MeasureDescriptor(
+        id="rss_bytes",
+        unit="By",
+        integral=True,
+        description="Process resident set size.",
+    ),
+    MeasureDescriptor(
+        id="queue_max_depth",
+        unit="{message}",
+        integral=True,
+        description="Deepest any subscription queue got since the last heartbeat.",
+    ),
+    MeasureDescriptor(
+        id="age_mean_ms",
+        unit="ms",
+        description="Publish-to-dequeue delay, mean over the last heartbeat interval.",
+    ),
+    MeasureDescriptor(
+        id="age_max_ms",
+        unit="ms",
+        description="Publish-to-dequeue delay, worst case over the last heartbeat interval.",
+    ),
+    MeasureDescriptor(
+        id="handler_mean_ms",
+        unit="ms",
+        description="Time spent inside handlers, mean over the last heartbeat interval.",
+    ),
+    MeasureDescriptor(
+        id="handler_max_ms",
+        unit="ms",
+        description="Time spent inside handlers, worst case over the last heartbeat interval.",
+    ),
+)
+"""The heartbeat's own numeric fields, described the way ``@metric`` describes
+an application's. Ids are the :class:`NodeHealth` field names, so a consumer
+reads a value by ``getattr(health, id)`` and formats it by descriptor, in any
+language. Published on :attr:`zenode.msgs.NodeInfo.runtime` and rendered by
+``zenode export``, which keeps its own series names (``sent_total``, seconds
+instead of ``ms``) as rendering rules on top of this one table. Units are the
+*wire* units: ``ms`` here, because that is what the field holds."""
+
+RUNTIME_BY_ID: dict[str, MeasureDescriptor] = {d.id: d for d in RUNTIME_MEASURES}
+"""The same catalog, indexed; ``tests/test_runtime_measures.py`` holds it to
+exactly the numeric fields of :class:`NodeHealth`."""

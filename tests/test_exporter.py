@@ -64,6 +64,13 @@ def test_labels_carry_node_and_namespace():
     assert 'zenode_node_sent_total{namespace="robodog",node="camera"} 3' in text
 
 
+def test_deadline_misses_are_exported():
+    """On the heartbeat since the start, in the exporter's table since now."""
+    text = render({"camera": Sample(_health(deadline_misses=4), 100.0)}, "robodog", now=100.0)
+    assert "# TYPE zenode_node_deadline_misses_total counter" in text
+    assert 'zenode_node_deadline_misses_total{namespace="robodog",node="camera"} 4' in text
+
+
 def test_milliseconds_become_seconds():
     """Prometheus convention is base units; NodeHealth reports milliseconds."""
     text = render({"camera": Sample(_health(age_max_ms=121.5), 100.0)}, "", now=100.0)

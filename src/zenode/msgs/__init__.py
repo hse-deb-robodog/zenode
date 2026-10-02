@@ -7,7 +7,7 @@ own contract package, where they can evolve with the robot.
 
 from .empty import Empty
 from .geometry import Pose, Pose2D, Quaternion, Transform, Twist, Vector3
-from .health import NodeHealth, NodeState, health_key, health_pattern
+from .health import RUNTIME_MEASURES, NodeHealth, NodeState, health_key, health_pattern
 from .info import (
     EntityInfo,
     MeasureDescriptor,
@@ -20,6 +20,7 @@ from .info import (
 from .log import LogRecordMsg, log_key, log_pattern
 
 __all__ = [
+    "RUNTIME_MEASURES",
     "Empty",
     "EntityInfo",
     "LogRecordMsg",
