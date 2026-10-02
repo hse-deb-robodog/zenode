@@ -60,6 +60,7 @@ dev = [
     "ty>=0.0.63",
     "pre-commit>=4.6.1",
     "opentelemetry-sdk>=1.20",  # tests/test_otel.py records spans in memory
+    "jsonschema>=4.26",
 ]
 docs = [
     # Built in CI and on demand (uv run --group docs …); never shipped, so the

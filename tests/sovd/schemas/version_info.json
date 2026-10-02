@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VersionInfo",
+  "description": "Version info response",
+  "type": "object",
+  "properties": {
+    "sovd_info": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SovdInfo"
+      }
+    }
+  },
+  "required": [
+    "sovd_info"
+  ],
+  "$defs": {
+    "SovdInfo": {
+      "description": "Single SOVD instance info",
+      "type": "object",
+      "properties": {
+        "base_uri": {
+          "$ref": "#/$defs/UriReference"
+        },
+        "vendor_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VendorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "base_uri"
+      ]
+    },
+    "UriReference": {
+      "type": "string",
+      "format": "uri-reference"
+    },
+    "VendorInfo": {
+      "description": "Default vendor info type",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "name"
+      ]
+    }
+  }
+}

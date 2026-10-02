@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityCapabilities",
+  "description": "Entity capabilities response.",
+  "type": "object",
+  "properties": {
+    "apps": {
+      "description": "Reference to the Apps collection (root level only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "areas": {
+      "description": "Reference to the Areas collection (root level only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "belongs-to": {
+      "description": "Reference to belongs-to collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bulk-data": {
+      "description": "Reference to the bulk-data collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "communication-logs": {
+      "description": "Reference to the communication-logs collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "components": {
+      "description": "Reference to the Components collection (root level only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "configurations": {
+      "description": "Reference to the configurations collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "contains": {
+      "description": "Reference to contains collection (only for Areas)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cyclic-subscriptions": {
+      "description": "Reference to the cyclic-subscriptions collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "data": {
+      "description": "Reference to the data collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "data-lists": {
+      "description": "Reference to the data-lists collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "depends-on": {
+      "description": "Reference to depends-on collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "faults": {
+      "description": "Reference to the faults collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "functions": {
+      "description": "Reference to the Functions collection (root level only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hosts": {
+      "description": "Reference to hosts collection (only for Components)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "id": {
+      "description": "Entity identifier (may be empty for `SOVDServer`)",
+      "type": "string"
+    },
+    "is-located-on": {
+      "description": "Reference to the Component where the App is located (only for Apps)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "locks": {
+      "description": "Reference to the locks collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "logs": {
+      "description": "Reference to the logs resource",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "modes": {
+      "description": "Reference to the modes collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "description": "Name of the Entity (may be empty for `SOVDServer`)",
+      "type": "string"
+    },
+    "operations": {
+      "description": "Reference to the operations collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scripts": {
+      "description": "Reference to the scripts collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "subareas": {
+      "description": "Reference to the subareas collection (only for Areas)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "subcomponents": {
+      "description": "Reference to the subcomponents collection (only for Components)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "translation_id": {
+      "description": "Identifier for translating the name",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "triggers": {
+      "description": "Reference to the triggers collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updates": {
+      "description": "Reference to the updates collection",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UriReference"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "variant": {
+      "description": "Identification of the variant",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "$defs": {
+    "UriReference": {
+      "type": "string",
+      "format": "uri-reference"
+    }
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadResponse",
+  "type": "object",
+  "properties": {
+    "data": true,
+    "errors": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/DataErrorEntry"
+      }
+    },
+    "id": {
+      "type": "string"
+    },
+    "schema": true
+  },
+  "required": [
+    "id",
+    "data"
+  ],
+  "$defs": {
+    "DataErrorEntry": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/GenericError"
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer"
+        }
+      },
+      "required": [
+        "path",
+        "error"
+      ]
+    },
+    "ErrorCode": {
+      "description": "SOVD error codes.",
+      "oneOf": [
+        {
+          "description": "The Component receiving the request has answered with an error.",
+          "type": "string",
+          "const": "error-response"
+        },
+        {
+          "description": "The request does not provide all information required to complete the method.",
+          "type": "string",
+          "const": "incomplete-request"
+        },
+        {
+          "description": "The SOVD client does not have the right to access the resource.",
+          "type": "string",
+          "const": "insufficient-access-rights"
+        },
+        {
+          "description": "The response provided by the Component contains information which could not be processed.",
+          "type": "string",
+          "const": "invalid-response-content"
+        },
+        {
+          "description": "The signature of the data in the payload is invalid.",
+          "type": "string",
+          "const": "invalid-signature"
+        },
+        {
+          "description": "The lock of the client has been broken by another client.",
+          "type": "string",
+          "const": "lock-broken"
+        },
+        {
+          "description": "The Component which handles the request has been queried but did not respond.",
+          "type": "string",
+          "const": "not-responding"
+        },
+        {
+          "description": "The preconditions to execute the method are not fulfilled.",
+          "type": "string",
+          "const": "precondition-not-fulfilled"
+        },
+        {
+          "description": "The SOVD server is able to answer requests, but an internal error occurred.",
+          "type": "string",
+          "const": "sovd-server-failure"
+        },
+        {
+          "description": "The SOVD server is not configured correctly.",
+          "type": "string",
+          "const": "sovd-server-misconfigured"
+        },
+        {
+          "description": "Another update is currently being executed in automated mode.",
+          "type": "string",
+          "const": "update-automated-not-supported"
+        },
+        {
+          "description": "Another update is currently executed and not yet done or aborted.",
+          "type": "string",
+          "const": "update-execution-in-progress"
+        },
+        {
+          "description": "An update is already in preparation and not yet done or aborted.",
+          "type": "string",
+          "const": "update-preparation-in-progress"
+        },
+        {
+          "description": "An update is already in progress and not yet done or aborted.",
+          "type": "string",
+          "const": "update-process-in-progress"
+        },
+        {
+          "description": "Details are specified in the `vendor_code`.",
+          "type": "string",
+          "const": "vendor-specific"
+        }
+      ]
+    },
+    "GenericError": {
+      "description": "Generic error type.",
+      "type": "object",
+      "properties": {
+        "error_code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parameters": true,
+        "translation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vendor_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "error_code",
+        "message"
+      ]
+    },
+    "JsonPointer": {
+      "type": "string",
+      "format": "json-pointer"
+    }
+  }
+}

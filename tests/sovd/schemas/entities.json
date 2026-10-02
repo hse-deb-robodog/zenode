@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Items",
+  "description": "Generic response for collections with items",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntityReference"
+      }
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "$defs": {
+    "EntityReference": {
+      "description": "Entity reference.",
+      "type": "object",
+      "properties": {
+        "href": {
+          "description": "URI of the Entity including `base_uri`",
+          "$ref": "#/$defs/UriReference"
+        },
+        "id": {
+          "description": "Identifier for the Entity",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the Entity",
+          "type": "string"
+        },
+        "tags": {
+          "description": "List of tags for the Entity",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "translation_id": {
+          "description": "Identifier for translating the name",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "href"
+      ]
+    },
+    "UriReference": {
+      "type": "string",
+      "format": "uri-reference"
+    }
+  }
+}

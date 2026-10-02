@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Items",
+  "description": "Generic response for collections with items",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DataCategoryInformation"
+      }
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "$defs": {
+    "DataCategory": {
+      "description": "Data category type.",
+      "anyOf": [
+        {
+          "description": "Identifications - read access to fixed parameters (part number, VIN)",
+          "type": "string",
+          "const": "identData"
+        },
+        {
+          "description": "Measurements - read access to dynamically changing values (battery voltage)",
+          "type": "string",
+          "const": "currentData"
+        },
+        {
+          "description": "Parameters - read and write access to parameters",
+          "type": "string",
+          "const": "storedData"
+        },
+        {
+          "description": "System information - read access to dynamic system resources (CPU load)",
+          "type": "string",
+          "const": "sysInfo"
+        },
+        {
+          "description": "Custom category with x-<ext>- prefix",
+          "type": "string"
+        }
+      ]
+    },
+    "DataCategoryInformation": {
+      "description": "Data category information.",
+      "type": "object",
+      "properties": {
+        "category_translation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item": {
+          "$ref": "#/$defs/DataCategory"
+        }
+      },
+      "required": [
+        "item"
+      ]
+    }
+  }
+}
