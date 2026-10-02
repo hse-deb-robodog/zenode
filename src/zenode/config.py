@@ -31,9 +31,10 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 import zenoh
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from .errors import ConfigError
+from .errors import ConfigError, ContractError
+from .topic import validate_namespace
 
 ENV_CONFIG_PATH = "ZENODE_CONFIG"
 DEFAULT_CONFIG_FILE = "zenode.toml"
@@ -78,6 +79,18 @@ class TransportConfig(NodeConfig):
     """HLC timestamps on published samples. Required for latched topics
     (zenoh-ext's cache needs it); routers have it on by default, plain
     peer/client sessions do not — so zenode enables it."""
+
+    @field_validator("namespace")
+    @classmethod
+    def _namespace_is_routable(cls, value: str) -> str:
+        # The contract layer owns the rule; pydantic only reports it. ValueError
+        # is what pydantic turns into a ValidationError naming the field.
+        try:
+            validate_namespace(value, what="[transport]")
+        except ContractError as e:
+            raise ValueError(str(e)) from None
+        return value
+
     overrides: dict[str, Any] = Field(default_factory=dict)
     """Escape hatch: raw zenoh config entries, inserted as JSON5 by path
     (e.g. ``{"transport/link/tx/queue/congestion_control/wait_before_drop": 1000}``)."""

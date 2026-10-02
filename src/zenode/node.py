@@ -63,7 +63,7 @@ from .reporting import Reporter, ReporterSources
 from .service import ServiceHandler, ServiceServer, call_service
 from .shm import DEFAULT_POOL_BYTES, ShmPool
 from .timers import OnTimerError, Timer, resolve_interval
-from .topic import Service, Topic, resolve_key
+from .topic import Service, Topic, resolve_key, validate_namespace, validate_node_name
 from .trace import TraceRing
 
 T = TypeVar("T")
@@ -225,6 +225,7 @@ class Node:
     ) -> None:
         if not self.name:
             raise ContractError(f"{type(self).__name__} must set a class-level `name`")
+        validate_node_name(self.name, what=type(self).__name__)
         if self.start_timeout is not None and self.start_timeout <= 0:
             raise ContractError(
                 f"{type(self).__name__}.start_timeout must be positive or None, "
@@ -237,6 +238,7 @@ class Node:
             )
         self.__transport = transport if transport is not None else TransportConfig()
         self.namespace = self.__transport.namespace if namespace is None else namespace
+        validate_namespace(self.namespace, what=type(self).__name__)
         self.__session: zenoh.Session | None = session
         self.__session_owned = session is None
         self.log = node_logger(self.name)

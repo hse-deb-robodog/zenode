@@ -12,6 +12,7 @@ process-wide registry, which powers the CLI (``zenode topics``, typed
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, get_args
@@ -65,6 +66,43 @@ def _validate_key(key: str, *, what: str) -> None:
         raise ContractError(f"{what}: key {key!r} contains an empty segment")
     if any(ch.isspace() for ch in key):
         raise ContractError(f"{what}: key {key!r} contains whitespace")
+
+
+NAME_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
+"""What a node name and each namespace segment may be. Stricter than
+:func:`_validate_key` on purpose: a name becomes a segment of every reserved
+key (``node/<name>/health``) and, for diagnostic tooling, a URL path segment,
+and neither can carry ``/``, zenoh's ``*`` and ``$*`` wildcards, or the URL
+delimiters ``?``, ``#`` and ``%``. Measure ids already take the same stance
+for the same reason."""
+
+
+def validate_node_name(name: str, *, what: str) -> None:
+    """Reject a node name that cannot be a key segment or a path segment."""
+    if not name:
+        raise ContractError(f"{what}: name must not be empty")
+    if not NAME_SEGMENT.match(name):
+        raise ContractError(
+            f"{what}: name {name!r} must match {NAME_SEGMENT.pattern} — "
+            "one segment, no '/', wildcards or URL delimiters"
+        )
+
+
+def validate_namespace(namespace: str, *, what: str) -> None:
+    """Reject a namespace whose segments cannot be key or path segments.
+
+    Empty is allowed and means "no prefix". Segments are separated by ``/``,
+    so ``fleet/robot1`` is fine and ``fleet/*`` is not.
+    """
+    if not namespace:
+        return
+    _validate_key(namespace, what=f"{what} namespace")
+    for segment in namespace.split("/"):
+        if not NAME_SEGMENT.match(segment):
+            raise ContractError(
+                f"{what}: namespace {namespace!r} has segment {segment!r}, "
+                f"which must match {NAME_SEGMENT.pattern}"
+            )
 
 
 def resolve_key(key: str, namespace: str, *, absolute: bool = False) -> str:

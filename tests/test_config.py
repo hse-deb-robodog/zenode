@@ -305,3 +305,12 @@ def test_zenoh_config_applies_raw_overrides():
     transport = TransportConfig(overrides={"scouting/multicast/interface": "eth0"})
     cfg = transport.to_zenoh_config()
     assert "eth0" in cfg.get_json("scouting/multicast/interface")
+
+
+def test_the_transport_namespace_is_validated():
+    """A namespace prefixes every key; one zenoh cannot route is caught at load."""
+    from pydantic import ValidationError
+
+    TransportConfig(namespace="fleet/robot1")
+    with pytest.raises(ValidationError, match="namespace"):
+        TransportConfig(namespace="fleet/*")

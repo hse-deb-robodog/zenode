@@ -13,7 +13,7 @@ from zenode import (
     registered_topics,
 )
 from zenode.errors import ContractError
-from zenode.topic import PRIORITIES
+from zenode.topic import PRIORITIES, validate_namespace, validate_node_name
 
 
 class Msg(BaseModel):
@@ -157,3 +157,29 @@ def test_an_operation_may_take_arguments():
 def test_an_unknown_diagnostic_is_a_contract_error():
     with pytest.raises(ContractError, match="diagnostic"):
         Service("x/y", request=_NoFields, reply=Msg, diagnostic="write")  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------- names and namespaces
+
+
+@pytest.mark.parametrize("name", ["nav", "arm-left", "cam.front", "Nav_2", "zenode-test-probe"])
+def test_good_node_names(name):
+    validate_node_name(name, what="Node")
+
+
+@pytest.mark.parametrize("name", ["", "arm/left", "nav*", "a b", "nav?", "nav#1", "nav%", "näv"])
+def test_bad_node_names(name):
+    """A name becomes a key segment and, for diagnostics, a URL path segment."""
+    with pytest.raises(ContractError, match="name"):
+        validate_node_name(name, what="Node")
+
+
+@pytest.mark.parametrize("namespace", ["", "robodog", "fleet/robot1", "a.b/c-d"])
+def test_good_namespaces(namespace):
+    validate_namespace(namespace, what="transport")
+
+
+@pytest.mark.parametrize("namespace", ["/robodog", "robodog/", "a//b", "a b", "fleet/*", "ns?"])
+def test_bad_namespaces(namespace):
+    with pytest.raises(ContractError, match="namespace"):
+        validate_namespace(namespace, what="transport")
