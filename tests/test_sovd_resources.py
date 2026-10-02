@@ -24,9 +24,14 @@ from zenode.sovd.topology import NodeView
 
 
 def _view(**kw: Any) -> NodeView:
-    base: dict[str, Any] = dict(
-        name="nav", presence="live", info=None, health=None, last_seen_s=None, logs=[]
-    )
+    base: dict[str, Any] = {
+        "name": "nav",
+        "presence": "live",
+        "info": None,
+        "health": None,
+        "last_seen_s": None,
+        "logs": [],
+    }
     return NodeView(**{**base, **kw})
 
 
