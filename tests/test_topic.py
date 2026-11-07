@@ -8,6 +8,7 @@ from zenode import (
     Topic,
     TopicSet,
     find_topic,
+    is_wildcard,
     registered_entries,
     registered_services,
     registered_topics,
@@ -196,3 +197,21 @@ def test_a_write_without_a_typed_body_is_a_contract_error(request_type):
     """A PUT body is JSON validated against a schema; nothing to write is an operation."""
     with pytest.raises(ContractError, match="diagnostic='write'"):
         Service("motion/max_speed", request=request_type, reply=bytes, diagnostic="write")
+
+
+@pytest.mark.parametrize(
+    "key,expected",
+    [
+        ("state/odom", False),
+        ("sensors/*/temp", True),
+        ("state/**", True),
+        ("arm_$*/joint", True),
+    ],
+)
+def test_is_wildcard(key, expected):
+    assert is_wildcard(key) is expected
+
+
+def test_a_wildcard_topic_is_a_valid_contract_entry():
+    """Subscribing to many keys is legitimate; only publishing on one is not."""
+    assert Topic("sensors/*/temp", Msg).key == "sensors/*/temp"

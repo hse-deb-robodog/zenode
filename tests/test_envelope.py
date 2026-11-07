@@ -21,3 +21,9 @@ def test_tolerant_decode():
     assert decode_envelope(b"not json") == Envelope()
     assert decode_envelope(b"[1,2]") == Envelope()
     assert decode_envelope(b'{"n": 42, "s": "x"}') == Envelope()  # wrong types ignored
+
+
+def test_received_key_survives_a_missing_or_malformed_attachment():
+    assert decode_envelope(None, "a/b").key == "a/b"
+    assert decode_envelope(b"not json", "a/b").key == "a/b"
+    assert decode_envelope(encode_envelope("n", 1, 0), "a/b").key == "a/b"

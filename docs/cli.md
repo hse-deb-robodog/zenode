@@ -51,6 +51,14 @@ state/battery              Battery         latched(1),block                     
 camera/rgb                 bytes           trace@0.01,shm,prio=data_low           contract.Robot.camera
 ```
 
+An optional key expression narrows the listing to keys it intersects, resolved
+against the namespace like `echo`'s key. `zenode topics sensors/lidar/temp`
+also lists a `sensors/*/temp` topic, which is the entry that would decode it.
+
+```bash
+zenode topics 'state/**' --contract my_robot.contract
+```
+
 Flags show what the contract promises: `latched(n)`, `max_age=`, `trace` or
 `trace@<ratio>` for a trace root, `shm`, and the
 [QoS](contracts.md#quality-of-service) settings (`prio=<band>`, `block`,
@@ -76,6 +84,12 @@ zenode echo state/odometry --contract my_robot.contract --meta
 `--meta` distinguishes *nothing is published* from *arriving but dropped*: it
 shows the sender and the age of every sample.
 
+The key may be a zenoh key expression. `zenode echo 'state/**'` decodes each
+sample by the contract topic its own key belongs to, falls back to raw for keys
+the contract does not know, and prefixes every sample with a `-- key=` line so
+two sources stay distinguishable. If any matching topic is latched, it asks
+for the cached history too.
+
 ### `hz`
 
 Measures the publish rate on a key over a rolling window.
@@ -86,6 +100,10 @@ zenode hz camera/rgb --window 5
 
 Confirms that a producer holds its rate, instead of inferring the rate from a
 timer's configuration.
+
+On a wildcard such as `zenode hz 'state/**'` it prints one rate per concrete
+key, since a 100 Hz IMU and a 1 Hz battery blended into one number describe
+neither.
 
 ## Watching nodes
 
@@ -131,6 +149,14 @@ The block under the table is the nodes' own
 [`@metric` measurements](nodes.md#measurements), with the units from each node's
 latched descriptor. Only nodes that report measurements appear there, so a fleet
 that declares none prints nothing extra.
+
+An optional node pattern narrows the table to matching names. It is one key
+segment, so `arm` for one node or a chunk wildcard such as `'arm_$*'` for a
+group:
+
+```bash
+zenode health 'arm_$*' --watch
+```
 
 Exits non-zero when nothing answered, so it composes into a health check.
 `--wait` sets how long to collect first, and `--watch` refreshes in place.

@@ -84,6 +84,15 @@ async def test_envelope_metadata_attached():
         assert age is not None and age < 5.0
 
 
+async def test_a_wildcard_subscription_learns_which_key_matched():
+    """Through real zenoh routing, not a fake sample: ``Envelope.key`` is the concrete key."""
+    async with harness(namespace="robo") as h:
+        out = h.collect(Topic("sensors/*/ping", Ping))
+        h.publisher(Topic("sensors/left/ping", Ping)).put(Ping(value=1))
+        await out.next()
+        assert out.envelopes[0].key == "robo/sensors/left/ping"
+
+
 async def test_namespace_prefixing():
     async with harness(namespace="robo") as h:
         await h.start_node(EchoNode)
