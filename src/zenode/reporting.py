@@ -143,6 +143,11 @@ class ReporterSources:
     undecorated override is the one called, exactly as ``_wire_bindings``
     resolves a handler."""
     log: logging.Logger
+    config: Callable[[], BaseModel | None] = lambda: None
+    """The settings to describe, or ``None`` for a node that did not opt in
+    (:attr:`zenode.Node.describe_config`). A callable so every publish dumps
+    the *current* object — a ``diagnostic="write"`` handler may have replaced
+    it since start."""
 
 
 class Reporter:
@@ -265,6 +270,7 @@ class Reporter:
     def build_info(self) -> NodeInfo:
         """The descriptor, built from the live sources."""
         s = self._sources
+        config, config_schema = self._config()
         return NodeInfo(
             node=s.name,
             host=s.host,
@@ -275,7 +281,25 @@ class Reporter:
             measures=[m.descriptor for m in s.metrics.values()],
             runtime=list(RUNTIME_MEASURES),
             health_interval=s.health_interval,
+            config=config,
+            config_schema=config_schema,
         )
+
+    def _config(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The described config and its schema; ``({}, {})`` when there is none.
+
+        Guarded on its own: a field that will not serialize costs the
+        descriptor its config, not the wiring and catalog every other consumer
+        relies on.
+        """
+        try:
+            model = self._sources.config()
+            if model is None:
+                return {}, {}
+            return model.model_dump(mode="json"), type(model).model_json_schema()
+        except Exception:
+            self._sources.log.exception("describing the node config failed; omitting it")
+            return {}, {}
 
     def _sample(self) -> dict[str, float]:
         """Evaluate the ``@metric`` declarations for one heartbeat.

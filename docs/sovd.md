@@ -72,6 +72,30 @@ Nothing is scraped from topics: a node that wants a value diagnosable either
 exposes it as a `@metric` on its heartbeat or declares a `diagnostic="read"`
 service (see [Contracts](contracts.md#service)).
 
+## Settings and writes
+
+Two descriptor fields are there for `zenode-sovd` to serve settings as
+`storedData` and accept `PUT` on a data item:
+
+- `NodeInfo.config` / `NodeInfo.config_schema`: the node's `NodeConfig` and its
+  JSON Schema. A node opts in with `describe_config = True`; without that,
+  both are empty. These fields are read-only.
+- `ServiceInfo.diagnostic == "write"`: a service whose typed request is the
+  `PUT` body, validated against `request_schema`. The node's handler applies
+  the write. A successful write republishes the descriptor, so the new value
+  appears in `NodeInfo.config`.
+
+Setting a field of `NodeInfo.config` does not write it. A setting is writable
+only if the node declares a `"write"` service for it.
+
+`examples/tunable.py` runs both halves, with a small client in place of
+`zenode-sovd`:
+
+```bash
+uv run python examples/tunable.py drive
+uv run python examples/tunable.py tune 0.8
+```
+
 ## Presence
 
 | `x-zenode-presence` | Meaning |

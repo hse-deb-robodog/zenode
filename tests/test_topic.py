@@ -184,3 +184,15 @@ def test_good_namespaces(namespace):
 def test_bad_namespaces(namespace):
     with pytest.raises(ContractError, match="namespace"):
         validate_namespace(namespace, what="transport")
+
+
+def test_a_write_takes_a_typed_body():
+    svc = Service("motion/max_speed", request=_WithField, reply=Msg, diagnostic="write")
+    assert svc.diagnostic == "write"
+
+
+@pytest.mark.parametrize("request_type", [_NoFields, bytes], ids=["no-fields", "bytes"])
+def test_a_write_without_a_typed_body_is_a_contract_error(request_type):
+    """A PUT body is JSON validated against a schema; nothing to write is an operation."""
+    with pytest.raises(ContractError, match="diagnostic='write'"):
+        Service("motion/max_speed", request=request_type, reply=bytes, diagnostic="write")
