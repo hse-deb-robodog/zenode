@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from zenode import Service, Topic
 from zenode.declarative import Measurement
@@ -415,3 +415,46 @@ def test_the_descriptor_carries_the_runtime_catalog():
 def test_the_descriptor_carries_the_health_interval():
     assert reporter(health_interval=2.0).build_info().health_interval == 2.0
     assert reporter(health_interval=None).build_info().health_interval is None
+
+
+# -------------------------------------------------------------------- config
+
+
+class _Settings(BaseModel):
+    max_speed: float = 1.5
+    token: SecretStr = SecretStr("hunter2")
+
+
+def test_no_config_source_leaves_the_descriptor_without_config():
+    info = reporter().build_info()
+    assert info.config == {}
+    assert info.config_schema == {}
+
+
+def test_a_described_config_reaches_the_descriptor_with_secrets_masked():
+    info = reporter(config=lambda: _Settings()).build_info()
+    assert info.config == {"max_speed": 1.5, "token": "**********"}
+    assert info.config_schema == _Settings.model_json_schema()
+
+
+def test_the_config_is_read_at_each_build():
+    """A write handler replaces `self.config`; the next descriptor shows it."""
+    current = _Settings()
+    r = reporter(config=lambda: current)
+    current = _Settings(max_speed=0.5)
+    assert r.build_info().config["max_speed"] == 0.5
+
+
+def test_a_config_that_will_not_serialize_costs_only_the_config(caplog):
+    def broken() -> BaseModel:
+        raise RuntimeError("no dump for you")
+
+    put = _Put()
+    r = Reporter(sources(config=broken, servers=[_FakeServer(SUM, "svc/sum")]))
+    r.attach(_Put(), put)
+    with caplog.at_level(logging.ERROR, logger="test.reporter"):
+        r.publish_info()
+    assert len(put.sent) == 1
+    assert put.sent[0].config == {}
+    assert [s.key for s in put.sent[0].serves] == ["svc/sum"]
+    assert "describing the node config failed" in caplog.text

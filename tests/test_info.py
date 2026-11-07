@@ -17,7 +17,17 @@ import pytest
 from conftest import internals
 from pydantic import BaseModel
 
-from zenode import Node, Service, Topic, TransportConfig, metric, publish, subscribe
+from zenode import (
+    Node,
+    NodeConfig,
+    Service,
+    Topic,
+    TransportConfig,
+    metric,
+    publish,
+    subscribe,
+)
+from zenode.errors import ContractError
 from zenode.msgs import NodeInfo, info_key, info_pattern
 from zenode.msgs.health import health_key
 from zenode.msgs.log import log_key
@@ -94,6 +104,69 @@ def test_the_transport_section_overrides_the_hostname():
     reporter = internals(Described(transport=TransportConfig(host="jetson"))).reporter
     assert reporter.build_info().host == "jetson"
     assert reporter.build_health().host == "jetson"
+
+
+# ------------------------------------------------------------------------ config
+
+
+class SpeedConfig(NodeConfig):
+    max_speed: float = 1.0
+
+
+class MaxSpeed(BaseModel):
+    max_speed: float
+
+
+SET_MAX_SPEED = Service("motion/max_speed", request=MaxSpeed, reply=MaxSpeed, diagnostic="write")
+
+
+class Configured(Node):
+    name = "configured"
+    health_interval = 0.05
+    describe_config = True
+    config: SpeedConfig
+
+    async def on_start(self) -> None:
+        self.serve(SET_MAX_SPEED, self.set_max_speed)
+
+    def set_max_speed(self, req: MaxSpeed) -> MaxSpeed:
+        self.config = self.config.model_copy(update={"max_speed": req.max_speed})
+        return MaxSpeed(max_speed=self.config.max_speed)
+
+
+def test_config_is_off_the_descriptor_unless_the_node_opts_in():
+    class Quiet(Node):
+        name = "quiet"
+        config: SpeedConfig
+
+    assert internals(Quiet()).reporter.build_info().config == {}
+    assert internals(Configured()).reporter.build_info().config == {"max_speed": 1.0}
+
+
+def test_describing_a_config_the_node_does_not_have_is_refused():
+    class Bare(Node):
+        name = "bare"
+        describe_config = True
+
+    with pytest.raises(ContractError, match="describe_config"):
+        Bare()
+
+
+@pytest.mark.integration
+async def test_a_write_republishes_the_descriptor_with_the_new_config(zen):
+    await zen.start_node(Configured)
+    collected: list[NodeInfo] = []
+    zen.subscribe(Topic(info_key("configured"), NodeInfo, latched=True), collected.append)
+    await _settle()
+    assert collected and collected[-1].config == {"max_speed": 1.0}
+    assert collected[-1].config_schema["properties"]["max_speed"]["type"] == "number"
+
+    reply = await zen.call(SET_MAX_SPEED, MaxSpeed(max_speed=0.25))
+    assert reply.max_speed == 0.25
+    collected.clear()
+    await _settle()
+    assert len(collected) == 1
+    assert collected[0].config == {"max_speed": 0.25}
 
 
 # ------------------------------------------------------------------- late joiners

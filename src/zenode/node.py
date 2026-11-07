@@ -106,6 +106,7 @@ _OVERRIDE_POINTS = frozenset(
     {
         "name",
         "config",
+        "describe_config",
         "on_start",
         "on_stop",
         "allow_duplicates",
@@ -178,6 +179,19 @@ class Node:
     join hands the process to SIGKILL. ``on_stop`` has already run by then, so
     the hardware is released either way; what the bound buys is a log line
     naming the tasks that overstayed."""
+
+    describe_config: ClassVar[bool] = False
+    """Publish ``self.config`` and its JSON Schema on the node's latched
+    descriptor (:attr:`zenode.msgs.NodeInfo.config`), where diagnostic tooling
+    such as ``zenode-sovd`` serves it read-only.
+
+    Off by default because settings are where credentials live, and what a
+    robot shows a diagnostic client is a deliberate act. Declare secrets as
+    ``SecretStr``: the dump masks them, a plain ``str`` goes out as written.
+    To make a setting adjustable, declare a ``diagnostic="write"`` service and
+    replace ``self.config`` in its handler; the next heartbeat republishes the
+    descriptor with the new value. A node with no ``config`` model that sets
+    this is refused at construction rather than silently describing nothing."""
 
     config: Any
 
@@ -255,6 +269,11 @@ class Node:
                         f"node {self.name!r} requires configuration "
                         f"({model.__name__} has required fields): {e}"
                     ) from e
+        if self.describe_config and not isinstance(getattr(self, "config", None), BaseModel):
+            raise ContractError(
+                f"{type(self).__name__}.describe_config is set but the node has no "
+                f"config model to describe"
+            )
 
         self.__loop: asyncio.AbstractEventLoop | None = None
         self.__stop_event = asyncio.Event()
@@ -294,8 +313,13 @@ class Node:
                 metrics=collect_metrics(type(self)),
                 resolve=lambda attr: getattr(self, attr),
                 log=self.log,
+                config=self.__described_config,
             )
         )
+
+    def __described_config(self) -> BaseModel | None:
+        """The config the descriptor carries — ``None`` unless opted in."""
+        return self.config if self.describe_config else None
 
     # ------------------------------------------------------------------ hooks
 
@@ -822,8 +846,19 @@ class Node:
         key = service.resolve(self.namespace)
         # Explicit type arguments: inference would otherwise solve Rep from the
         # handler's `Rep | Awaitable[Rep]` return and clash with Service's invariance.
+        # A successful write changed what the node is; marking the wiring
+        # makes the next beat republish the descriptor — at most once per beat
+        # however many writes arrive.
+        on_served = self.__reporter.mark_declared if service.diagnostic == "write" else None
         server = ServiceServer[Req, Rep](
-            service, key, handler, self.__loop, log=self.log, node_name=self.name, ring=self.__ring
+            service,
+            key,
+            handler,
+            self.__loop,
+            log=self.log,
+            node_name=self.name,
+            ring=self.__ring,
+            on_served=on_served,
         )
         inner = self.session.declare_queryable(key, server._zenoh_callback)
         server._attach(inner)

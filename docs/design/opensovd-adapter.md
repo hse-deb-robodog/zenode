@@ -475,8 +475,10 @@ An out-of-process adapter that serves declared services crosses none of them.
 Deriving JSON Schema from pydantic is derivation, not code generation. The one
 place the fence bites is `/configurations`: SOVD allows writing them, and a
 writable configuration resource *is* a parameter server. `NodeConfig` is never
-mapped — a node that wants a setting adjustable can declare a service for it,
-which puts the decision in the contract where it belongs.
+*written* by zenode. A node may opt in (`describe_config = True`) to publish
+its config read-only on the descriptor. A node that wants a setting
+adjustable declares a `diagnostic="write"` service whose handler applies the
+change, which keeps the decision in the contract where it belongs.
 
 ## 15. Rejected alternatives
 

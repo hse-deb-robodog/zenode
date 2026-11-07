@@ -39,6 +39,7 @@ run(Nav)
 | `health_interval` | `2.0` | Seconds between health heartbeats. `None` disables. |
 | `start_timeout` | `30.0` | Seconds `on_start` may take before the node tears down and raises `StartTimeout`. `None` waits indefinitely. |
 | `shutdown_timeout` | `5.0` | Seconds teardown waits for cancelled background tasks. Overstayers are named in a warning. |
+| `describe_config` | `False` | Publish `self.config` and its JSON Schema on the latched descriptor (`NodeInfo.config`), for diagnostic tooling. Declare secrets as `SecretStr`, which the dump masks; a plain `str` is published as written. |
 | `allow_duplicates` | `True` | When `False`, a second node of this name raises `DuplicateNodeError`. |
 | `publish_logs_at` | `"WARNING"` | Minimum level published to the log topic. `None` disables. |
 | `trace_ring` | `4096` | Hops retained for `zenode trace`. `0` disables. |

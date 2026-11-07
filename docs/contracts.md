@@ -132,7 +132,7 @@ GET_MAP = Service("nav/get_map", request=MapRequest, reply=CostMap)
 | `request` / `reply` | — | Payload types. |
 | `request_codec` / `reply_codec` | derived | Wire formats. |
 | `description` | `""` | One line for humans, published on the node's descriptor. |
-| `diagnostic` | `None` | `"read"`: callable by a diagnostic client as a side-effect-free data resource; needs a request with no fields (`zenode.msgs.Empty`). `"operation"`: an action, never reachable by GET. `None`: not exposed. |
+| `diagnostic` | `None` | `"read"`: callable by a diagnostic client as a side-effect-free data resource; needs a request with no fields (`zenode.msgs.Empty`). `"write"`: an idempotent state change reachable by PUT; needs a request model with at least one field, and the handler decides what changes. `"operation"`: an action, never reachable by GET. `None`: not exposed. |
 
 A handler that raises produces a structured error reply, so the caller receives
 a `ServiceError` carrying the message rather than a silent timeout. No server
@@ -146,7 +146,15 @@ sidecar's configuration.
 ```python
 GET_POSE = Service("state/get_pose", request=Empty, reply=Pose, diagnostic="read")
 HOME = Service("motion/home", request=AxisId, reply=Ack, diagnostic="operation")
+SET_MAX_SPEED = Service("motion/max_speed", request=MaxSpeed, reply=MaxSpeed, diagnostic="write")
 ```
+
+A `"write"` handler owns the write: it validates the value, applies it to the
+hardware, and replaces `self.config` if the setting lives there. zenode never
+writes a request body into `NodeConfig` for you, because that would make it a
+parameter server. After each successful write, the node republishes its
+descriptor on the next heartbeat, so a node with `describe_config = True`
+shows the new value (see [Nodes](nodes.md)).
 
 Services are for questions with answers: fetch a map, query a parameter, run a
 calibration. A value that changes continuously belongs on a topic, where late

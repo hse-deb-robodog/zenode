@@ -78,7 +78,8 @@ class ServiceInfo(BaseModel):
     reply: str = ""
     """Class names, for a human reading a table — see :attr:`EntityInfo.schema_name`."""
     diagnostic: Diagnostic | None = None
-    """``"read"``, ``"operation"`` or not exposed — :attr:`zenode.Service.diagnostic`."""
+    """``"read"``, ``"write"``, ``"operation"`` or not exposed —
+    :attr:`zenode.Service.diagnostic`."""
     description: str = ""
     request_schema: dict[str, Any] = {}
     reply_schema: dict[str, Any] = {}
@@ -139,3 +140,15 @@ class NodeInfo(BaseModel):
     publishes none. A consumer cannot tell silence from a slow node without it;
     with it, three missed beats is the same rule a subscription ``deadline``
     uses."""
+    config: dict[str, Any] = {}
+    config_schema: dict[str, Any] = {}
+    """The node's ``NodeConfig`` as ``model_dump(mode="json")`` and its
+    ``model_json_schema()`` — ``{}`` unless the node sets
+    :attr:`zenode.Node.describe_config`.
+
+    Opt-in because exposure is a deliberate act and settings are where
+    credentials live: a ``SecretStr`` field is masked by the dump, a plain
+    ``str`` password is not. A snapshot as of the last descriptor publish; a
+    ``diagnostic="write"`` call republishes it. Read-only on the bus — a
+    setting becomes writable only through a service the node declares, never
+    by writing this dict back (a parameter server is outside the scope fence)."""

@@ -47,10 +47,12 @@ PRIORITIES: tuple[Priority, ...] = get_args(Priority)
 
 CONGESTION_CONTROLS: tuple[CongestionControl, ...] = get_args(CongestionControl)
 
-Diagnostic = Literal["read", "operation"]
+Diagnostic = Literal["read", "write", "operation"]
 """How a diagnostic client may reach a service. ``"read"`` is served as a
-side-effect-free data resource (an HTTP GET); ``"operation"`` is an action and
-is only ever reachable by an explicit POST. ``None``, the default on
+side-effect-free data resource (an HTTP GET); ``"write"`` is an idempotent
+state change with a typed body (an HTTP PUT) whose handler decides what
+changes; ``"operation"`` is an action and is only ever reachable by an
+explicit POST. ``None``, the default on
 :class:`Service`, means the service is not exposed at all — what a robot shows
 a diagnostic client is a decision for the contract, not a sidecar's config."""
 
@@ -245,7 +247,13 @@ class Service(Generic[Req, Rep]):
             may call this service. ``"read"`` becomes a data resource reachable
             by GET, so its ``request`` must be a model with no fields — a GET
             has no body, and a read that takes arguments would need a second
-            serialization path nobody asked for. ``"operation"`` may act and
+            serialization path nobody asked for. ``"write"`` is reachable by
+            PUT: its ``request`` must be a model with at least one field (the
+            body is JSON validated against its schema, and a write with
+            nothing to write is an operation). The handler owns the write —
+            zenode never applies a body to ``NodeConfig`` itself, which would
+            make it a parameter server — and a successful call republishes the
+            node's descriptor. ``"operation"`` may act and
             is never reachable by GET. ``None`` is not exposed. A single
             tri-state rather than a ``read_only`` flag because a boolean
             conflates "safe to GET" with "externally visible", and visibility
@@ -278,6 +286,13 @@ class Service(Generic[Req, Rep]):
                 raise ContractError(
                     f"{what}: diagnostic='read' needs a request model with no fields "
                     f"(zenode.msgs.Empty), got {self.request.__name__}"
+                )
+        if self.diagnostic == "write":
+            fields = getattr(self.request, "model_fields", None)
+            if not fields:
+                raise ContractError(
+                    f"{what}: diagnostic='write' needs a request model with at least one "
+                    f"field, got {self.request.__name__}"
                 )
         if self.request_codec is None:
             object.__setattr__(self, "request_codec", default_codec(self.request))
