@@ -11,6 +11,7 @@ import errno
 import io
 import os
 import signal
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -803,6 +804,18 @@ def test_main_makes_stdout_line_buffered(monkeypatch, capsys):
     assert calls == [True]
 
 
+def test_cli_imports_without_posix_only_modules():
+    """Windows has no ``resource`` module; the CLI must still start there (#10).
+
+    Run in a fresh interpreter with the import made to fail, since this
+    process has long since imported both ``resource`` and ``zenode.cli``.
+    """
+    code = "import sys; sys.modules['resource'] = None; import zenode.cli"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no SIGPIPE on Windows")
 def test_main_exits_quietly_when_the_reader_closes_the_pipe(monkeypatch):
     """``zenode topics | head -4`` — head is done, we are not a failed command.
 
