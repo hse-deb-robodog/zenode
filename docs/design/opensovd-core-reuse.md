@@ -1,13 +1,15 @@
 # Reusing the Rust `opensovd-core` server instead of writing one
 
-**Status: research note. Not a decision, and nothing here is implemented.**
-The decision was taken on 2026-10-02 in the adapter note along the lines of §7:
-route A, with route B recorded as the alternative to return to. This page keeps
-the evidence; section numbers it cites from the adapter note refer to the
-proposal as drafted on 2026-09-21, which the decided version renumbered. It
-answers one question raised against the [OpenSOVD adapter](opensovd-adapter.md)
-proposal, against primary sources and two throwaway experiments, so the
-adapter's §3, §9, §11 and §13 can be revisited on evidence. Written 2026-09-21
+**Status: adopted (Route B).**
+Originally written as a research note on 2026-09-21, and subsequently chosen as
+the implementation path over maintaining a custom Python SOVD server inside
+`zenode`: the five bus-descriptor changes in §4 / §7(4) live in `zenode`, while
+the SOVD HTTP server and `DataProvider` bridge live in a standalone Rust crate
+(`zenode-sovd`) packaged as a Docker image. This page keeps the original
+evidence; section numbers it cites from the adapter note refer to the proposal
+as drafted on 2026-09-21. It answers one question raised against the
+[OpenSOVD adapter](opensovd-adapter.md) proposal, against primary sources and
+two throwaway experiments. Written 2026-09-21
 against `eclipse-opensovd/opensovd-core` at commit
 `26953d97da4335179083aff41ed52a82886499e7` (2026-09-21, `main`), the umbrella
 repository `opensovd` at `e769a39` (2026-06-29), `fault-lib` at `4a53a62`

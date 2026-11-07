@@ -1,23 +1,23 @@
 # OpenSOVD adapter
 
-**Status: Phase 1 implemented.** Drafted 2026-08-26 as a proposal, revised
-2026-09-21 after the [storage research note](zenoh-storage-for-sovd.md),
-decided 2026-10-02 after a design review that also absorbed the
-[reuse research note](opensovd-core-reuse.md), and Phase 1 landed the same
-day. User documentation is in [SOVD](../sovd.md); this page is the design and
-the two research notes keep the evidence. Every reference to upstream below is pinned to
+**Status: runtime descriptor changes implemented in `zenode`; SOVD server delegated to external `opensovd-core` provider (`zenode-sovd`, Route B).**
+Drafted 2026-08-26 as a proposal, revised 2026-09-21 after the
+[storage research note](zenoh-storage-for-sovd.md) and the
+[reuse research note](opensovd-core-reuse.md). User documentation is in
+[SOVD](../sovd.md); this page records the bus contract and mapping design, while
+[opensovd-core-reuse.md](opensovd-core-reuse.md) documents the Rust
+`opensovd-core` bridge architecture. Every reference to upstream below is pinned to
 `eclipse-opensovd/opensovd-core` at commit
 `26953d97da4335179083aff41ed52a82886499e7` (2026-09-21, `main`). "The route
 set", "the JSON shapes" and "the SOVD version" all mean that commit.
 
-The short version: zenode gets a **pure-Python, out-of-process sidecar** that
-serves what nodes declare diagnosable — their heartbeat, their declared
-measurements, and the services the contract marks as reads — over the exact
-HTTP surface `opensovd-core` serves today. It discovers everything from the
-bus, imports no contract, takes no new dependency, is read-only, and lives in a
-subpackage that can become its own distribution. It needs five small changes
-to the runtime, all at the contract and message layer. Operations, standard
-logs and faults are deliberately later or never.
+The short version: `zenode` makes five small additions at the contract and
+message layer so every node's latched `NodeInfo` descriptor and `NodeHealth`
+heartbeat are completely self-describing on the Zenoh bus, and an external
+Rust telemetry provider (`zenode-sovd`, built on `opensovd-core` and
+`opensovd-server` and packaged as a Docker image in its own repository) bridges
+the bus into OpenSOVD without importing any Python contract. Operations,
+standard logs and faults are deliberately later or never.
 
 ---
 
