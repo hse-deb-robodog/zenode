@@ -21,7 +21,6 @@ import importlib
 import json
 import os
 import queue
-import resource
 import signal
 import sys
 import threading
@@ -54,6 +53,10 @@ from .topic import (
     resolve_key,
     topic_flags,
 )
+
+# What a shell reports for a SIGPIPE death. Windows has no SIGPIPE (#10), so
+# there a closed pipe ends the command with a plain failure status instead.
+_BROKEN_PIPE_STATUS = 128 + signal.SIGPIPE if sys.platform != "win32" else 1
 
 
 def _load_contracts(modules: list[str]) -> None:
@@ -715,16 +718,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         check("shared memory module", True, "available")
         # The real gate is RLIMIT_MEMLOCK, not the build: a pool larger than it
         # fails, and zenoh reports that as a Rust panic rather than an error.
-        soft, _hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
-        unlimited = soft == resource.RLIM_INFINITY
-        check(
-            "memlock limit",
-            unlimited or soft >= 64 * 1024 * 1024,
-            "unlimited"
-            if unlimited
-            else f"{soft // (1024 * 1024)} MiB — raise it (LimitMEMLOCK=infinity) "
-            "before using Topic(shm=True) for frames",
-        )
+        # `resource` is POSIX-only and imported here rather than at the top so
+        # that every other command still starts on Windows (#10), which has no
+        # memlock rlimit to check.
+        if sys.platform == "win32":
+            check("memlock limit", True, "not applicable on Windows")
+        else:
+            import resource
+
+            soft, _hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+            unlimited = soft == resource.RLIM_INFINITY
+            check(
+                "memlock limit",
+                unlimited or soft >= 64 * 1024 * 1024,
+                "unlimited"
+                if unlimited
+                else f"{soft // (1024 * 1024)} MiB — raise it (LimitMEMLOCK=infinity) "
+                "before using Topic(shm=True) for frames",
+            )
     except ImportError:
         check("shared memory module", False, "not available in this build")
 
@@ -874,7 +885,7 @@ def main(argv: list[str] | None = None) -> None:
         # that flush hits the dead pipe again and prints "Exception ignored on
         # flushing sys.stdout" after we have already exited cleanly.
         sys.stdout = open(os.devnull, "w")  # noqa: SIM115 — outlives this frame
-        status = 128 + signal.SIGPIPE  # what a shell reports for a SIGPIPE death
+        status = _BROKEN_PIPE_STATUS
     sys.exit(status)
 
 
