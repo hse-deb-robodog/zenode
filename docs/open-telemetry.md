@@ -142,7 +142,7 @@ def setup_telemetry(service_name: str) -> None:
 zenode records three spans (`publish <key>`, `process <key>` and
 `serve <key>`) carrying OpenTelemetry messaging semantic conventions. It does
 not construct a `TracerProvider`, select an exporter, or read `OTEL_*`
-variables. See `examples/otel_pipeline.py` for a complete configuration.
+variables. See `examples/rover/telemetry.py` for a complete configuration.
 
 Application spans nest normally. A message published inside one is parented on
 it, and the trace context on the wire identifies it, so downstream nodes chain

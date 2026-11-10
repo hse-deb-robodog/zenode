@@ -72,8 +72,8 @@ The handler learns which key matched from `Envelope.key`, e.g.
 both with `ContractError`, because a put on a wildcard would land on every
 matching key at once.
 
-`examples/sensors.py` runs a node publishing several sensors under one
-wildcard topic and a monitor subscribed to all of them.
+In `examples/rover`, `rangers.py` publishes several range sensors under one
+wildcard topic and `safety.py` subscribes to all of them at once.
 
 ### Delivery semantics
 

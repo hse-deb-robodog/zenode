@@ -1,0 +1,37 @@
+# One file for the whole rover. Each node validates only its own section.
+# `python -m examples.rover` points $ZENODE_CONFIG here unless it is already set.
+
+[transport]
+namespace = "rover"
+shared_memory = true          # needed at both ends of camera/frame
+
+# Facts about the robot, not about one node: `drive` and `rangers` both read
+# this section, so they cannot disagree on it.
+[geometry]
+wheel-radius = 0.05           # m
+wheel-separation = 0.30       # m
+body-radius = 0.20            # m, hull edge to centre
+
+[node.teleop]
+linear = 0.6                  # m/s, above drive's cap on purpose
+angular = 0.3                 # rad/s
+
+[node.drive]
+max-speed = 0.5               # m/s, writable at runtime
+hard-max-speed = 1.5          # m/s, the chassis limit
+control-rate-hz = 20.0
+
+[node.rangers]
+room-half-size = 2.0          # m, a square room centred on the origin
+
+[node.rangers.sensors]        # name = bearing in rad, counter-clockwise from ahead
+front = 0.0
+left = 1.5708
+right = -1.5708
+
+[node.safety]
+stop-distance = 0.30          # m
+release-distance = 0.50       # m
+
+[node.detector]
+inference-time = 0.05         # s per frame, slower than the camera on purpose

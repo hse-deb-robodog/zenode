@@ -45,7 +45,7 @@ run(Nav)
 | `trace_ring` | `4096` | Hops retained for `zenode trace`. `0` disables. |
 | `shm_pool_bytes` | 64 MiB | Shared-memory pool, created on first use. |
 
-Those eight, plus `config`, `on_start` and `on_stop`, are the only names of
+Those nine, plus `config`, `on_start` and `on_stop`, are the only names of
 zenode's own that a subclass may redefine.
 
 ## The shared namespace

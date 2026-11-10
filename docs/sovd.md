@@ -86,12 +86,14 @@ Two descriptor fields are there for `zenode-sovd` to serve settings as
 Setting a field of `NodeInfo.config` does not write it. A setting is writable
 only if the node declares a `"write"` service for it.
 
-`examples/tunable.py` runs both halves, with a small client in place of
-`zenode-sovd`:
+`examples/rover` runs both halves, with a small client in place of
+`zenode-sovd`. `drive` describes its config and serves the write; `mission`
+calls it:
 
 ```bash
-uv run python examples/tunable.py drive
-uv run python examples/tunable.py tune 0.8
+uv run python -m examples.rover safety
+uv run python -m examples.rover drive
+uv run python -m examples.rover mission 0.8
 ```
 
 ## Presence

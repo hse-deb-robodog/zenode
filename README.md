@@ -109,6 +109,9 @@ metadata, so handlers stay directly callable in tests.
 
 ## Try the example
 
+The two-file starting point is below. For a whole system, seven nodes that
+depend on each other, see [`examples/rover`](examples/rover/README.md).
+
 ```bash
 uv sync
 uv run python examples/talker.py          # terminal 1
