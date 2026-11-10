@@ -15,16 +15,6 @@ shared-memory
 api/index
 ```
 
-```{toctree}
-:hidden:
-:caption: Design notes
-
-design/live-topics
-design/node-measures
-design/opensovd-adapter
-design/opensovd-core-reuse
-```
-
 zenode is a typed node framework for distributed robot systems on
 [Eclipse Zenoh](https://zenoh.io). Independent processes ("nodes") are coupled
 only through a typed topic contract. The runtime handles session bootstrap,
@@ -152,17 +142,3 @@ repository contains complete programs, each runnable as-is:
 
 Read [Contracts](contracts.md) first, since it is the part two processes must
 agree on. [Nodes](nodes.md) covers everything a single process does.
-
-## Design notes
-
-Where a design was taken, the note keeps its trade-offs and rejected
-alternatives, the reasoning the code no longer states. Where it was not, the
-note records a proposal, so the decision can still be taken or dropped on
-purpose. The status line at the top of each says which it is.
-
-| Note | Status | Question it answers |
-|---|---|---|
-| [Live topic discovery](design/live-topics.md) | partly built | How to see what is actually on the bus right now, and how it differs from the contract |
-| [Node-defined measurements](design/node-measures.md) | built | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
-| [OpenSOVD adapter](design/opensovd-adapter.md) | built | How zenode speaks [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics: bus descriptors in `zenode` + an external OpenSOVD provider |
-| [Reusing `opensovd-core`](design/opensovd-core-reuse.md) | adopted | Why and how the Rust `opensovd-core` server is used as a standalone telemetry provider container |

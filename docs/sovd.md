@@ -9,9 +9,7 @@ image in its own repository.
 
 Instead of maintaining a custom HTTP server inside `zenode`, `zenode` nodes
 publish self-describing telemetry on the Zenoh bus, and `zenode-sovd` bridges
-that bus into OpenSOVD's `Topology` and `DataProvider` traits. The design and
-trade-offs are documented in [the adapter design note](design/opensovd-adapter.md)
-and [the `opensovd-core` reuse note](design/opensovd-core-reuse.md).
+that bus into OpenSOVD's `Topology` and `DataProvider` traits.
 
 ## Running with Docker
 

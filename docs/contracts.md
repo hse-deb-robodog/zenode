@@ -157,7 +157,7 @@ a `ServiceError` carrying the message rather than a silent timeout. No server
 produces `ServiceTimeout`.
 
 `diagnostic` is how a service opts into the
-[OpenSOVD sidecar](design/opensovd-adapter.md). The default is off: what a
+[OpenSOVD sidecar](sovd.md). The default is off: what a
 robot shows a diagnostic client is decided here, in the contract, not in the
 sidecar's configuration.
 
