@@ -29,8 +29,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import BaseModel
+
 from .metrics import Latency, ProcessStats, summarize
-from .msgs.health import NodeHealth, NodeState
+from .msgs.health import RUNTIME_MEASURES, NodeHealth, NodeState
 from .msgs.info import EntityInfo, NodeInfo, ServiceInfo
 from .topic import Service, Topic, topic_flags
 
@@ -41,6 +43,28 @@ if TYPE_CHECKING:
 def _entity_info(topic: Topic[Any], key: str) -> EntityInfo:
     """One publisher or subscription, as it appears on the descriptor."""
     return EntityInfo(key=key, schema_name=topic.schema.__name__, flags=topic_flags(topic))
+
+
+def _json_schema(model: type[Any]) -> dict[str, Any]:
+    """``model_json_schema()`` where there is one; ``{}`` for ``bytes``."""
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        return model.model_json_schema()
+    return {}
+
+
+def _service_info(service: Service[Any, Any], key: str) -> ServiceInfo:
+    """One served service, as it appears on the descriptor."""
+    return ServiceInfo(
+        key=key,
+        request=service.request.__name__,
+        reply=service.reply.__name__,
+        diagnostic=service.diagnostic,
+        description=service.description,
+        request_schema=_json_schema(service.request),
+        reply_schema=_json_schema(service.reply),
+        request_encoding=str(service.request_codec.encoding),
+        reply_encoding=str(service.reply_codec.encoding),
+    )
 
 
 class PublisherLike(Protocol):
@@ -102,6 +126,8 @@ class ReporterSources:
     name: str
     host: str
     zenode_version: str
+    health_interval: float | None
+    """Published on the descriptor so a consumer can judge silence."""
     state: Callable[[], NodeState]
     publishers: Sequence[PublisherLike]
     subscriptions: Sequence[SubscriptionLike]
@@ -117,6 +143,11 @@ class ReporterSources:
     undecorated override is the one called, exactly as ``_wire_bindings``
     resolves a handler."""
     log: logging.Logger
+    config: Callable[[], BaseModel | None] = lambda: None
+    """The settings to describe, or ``None`` for a node that did not opt in
+    (:attr:`zenode.Node.describe_config`). A callable so every publish dumps
+    the *current* object — a ``diagnostic="write"`` handler may have replaced
+    it since start."""
 
 
 class Reporter:
@@ -239,22 +270,36 @@ class Reporter:
     def build_info(self) -> NodeInfo:
         """The descriptor, built from the live sources."""
         s = self._sources
+        config, config_schema = self._config()
         return NodeInfo(
             node=s.name,
             host=s.host,
             zenode=s.zenode_version,
             publishes=[_entity_info(p.topic, p.key) for p in s.publishers],
             subscribes=[_entity_info(sub.topic, sub.key) for sub in s.subscriptions],
-            serves=[
-                ServiceInfo(
-                    key=server.key,
-                    request=server.service.request.__name__,
-                    reply=server.service.reply.__name__,
-                )
-                for server in s.servers
-            ],
+            serves=[_service_info(server.service, server.key) for server in s.servers],
             measures=[m.descriptor for m in s.metrics.values()],
+            runtime=list(RUNTIME_MEASURES),
+            health_interval=s.health_interval,
+            config=config,
+            config_schema=config_schema,
         )
+
+    def _config(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The described config and its schema; ``({}, {})`` when there is none.
+
+        Guarded on its own: a field that will not serialize costs the
+        descriptor its config, not the wiring and catalog every other consumer
+        relies on.
+        """
+        try:
+            model = self._sources.config()
+            if model is None:
+                return {}, {}
+            return model.model_dump(mode="json"), type(model).model_json_schema()
+        except Exception:
+            self._sources.log.exception("describing the node config failed; omitting it")
+            return {}, {}
 
     def _sample(self) -> dict[str, float]:
         """Evaluate the ``@metric`` declarations for one heartbeat.

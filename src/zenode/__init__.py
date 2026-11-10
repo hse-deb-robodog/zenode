@@ -54,10 +54,13 @@ from .pubsub import OnDeadline, Publisher, Subscription
 from .service import ServiceServer
 from .timers import Timer
 from .topic import (
+    DIAGNOSTICS,
+    Diagnostic,
     Service,
     Topic,
     TopicSet,
     find_topic,
+    is_wildcard,
     registered_entries,
     registered_services,
     registered_topics,
@@ -69,10 +72,12 @@ from .topic import (
 __version__ = _version("zenode")
 
 __all__ = [
+    "DIAGNOSTICS",
     "Binding",
     "Codec",
     "ConfigError",
     "ContractError",
+    "Diagnostic",
     "DuplicateNodeError",
     "Envelope",
     "Measurement",
@@ -99,6 +104,7 @@ __all__ = [
     "every",
     "find_config_file",
     "find_topic",
+    "is_wildcard",
     "list_nodes",
     "list_nodes_async",
     "load_node_config",

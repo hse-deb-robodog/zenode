@@ -35,16 +35,17 @@ run(Nav)
 
 | Attribute | Default | Effect |
 |---|---|---|
-| `name` | — | Required. Identifies the node on the network and in logs. |
+| `name` | — | Required. Identifies the node on the network and in logs. One segment matching `[A-Za-z0-9_.-]+`: it becomes part of every reserved key and, for diagnostics, a URL path. |
 | `health_interval` | `2.0` | Seconds between health heartbeats. `None` disables. |
 | `start_timeout` | `30.0` | Seconds `on_start` may take before the node tears down and raises `StartTimeout`. `None` waits indefinitely. |
 | `shutdown_timeout` | `5.0` | Seconds teardown waits for cancelled background tasks. Overstayers are named in a warning. |
+| `describe_config` | `False` | Publish `self.config` and its JSON Schema on the latched descriptor (`NodeInfo.config`), for diagnostic tooling. Declare secrets as `SecretStr`, which the dump masks; a plain `str` is published as written. |
 | `allow_duplicates` | `True` | When `False`, a second node of this name raises `DuplicateNodeError`. |
 | `publish_logs_at` | `"WARNING"` | Minimum level published to the log topic. `None` disables. |
 | `trace_ring` | `4096` | Hops retained for `zenode trace`. `0` disables. |
 | `shm_pool_bytes` | 64 MiB | Shared-memory pool, created on first use. |
 
-Those eight, plus `config`, `on_start` and `on_stop`, are the only names of
+Those nine, plus `config`, `on_start` and `on_stop`, are the only names of
 zenode's own that a subclass may redefine.
 
 ## The shared namespace
@@ -142,7 +143,9 @@ Sync and async handlers are both accepted. All handlers run on the node's event
 loop, never on a zenoh thread.
 
 `Envelope` carries the delivery metadata: `node` (the sender), `seq`, `ts_ns`,
-`traceparent`, and `age_s()`.
+`traceparent`, and `age_s()`. It also carries `key`, the concrete key the
+sample arrived on with the namespace included, which is how a handler on a
+[wildcard topic](contracts.md#wildcard-keys) tells its sources apart.
 
 A handler that raises is logged and counted as `handler_errors`, and the
 subscription continues, so one bad message cannot take a node down.
@@ -296,8 +299,11 @@ The rules that matter in a body:
 
 Unit, kind and description travel separately, on the latched
 `<ns>/node/<name>/info` descriptor, so they are not repeated at the heartbeat
-rate. `zenode health` prints the values under its table and `zenode export`
-exports them as `zenode_app_<id>`; see
+rate. The same descriptor describes the heartbeat's own fields (`runtime`),
+carries the node's `health_interval` so a consumer can tell silence from a
+slow node, and lists each served service with its JSON schemas and
+`diagnostic` flag. `zenode health` prints the values under its table and
+`zenode export` exports them as `zenode_app_<id>`; see
 [Observability](open-telemetry.md#application-metrics) for the export detail and
 for where the line between a measurement and a read-only service falls.
 

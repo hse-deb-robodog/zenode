@@ -50,7 +50,7 @@ from .msgs.health import NodeHealth
 from .msgs.info import MeasureDescriptor, MeasureKind
 from .pubsub import OnDeadline, Publisher, SubscriptionMode
 from .timers import IntervalSpec, IntervalUnit, OnTimerError
-from .topic import Service, Topic
+from .topic import Service, Topic, reject_wildcard_publish
 
 T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
@@ -341,6 +341,9 @@ class publish(Generic[T]):
     """
 
     def __init__(self, topic: Topic[T]) -> None:
+        # At class definition, not at start: a wildcard here is a contract bug,
+        # and start() is too late to learn it — hardware may already be held.
+        reject_wildcard_publish(topic.key, what="publish()")
         self.topic = topic
         self._name = ""
 

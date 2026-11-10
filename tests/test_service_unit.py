@@ -212,3 +212,39 @@ async def test_undeclare_survives_a_transport_that_is_already_gone():
 
 async def test_undeclare_before_attach_is_a_noop():
     make_server(double).undeclare()
+
+
+# ---------------------------------------------------------------- on_served
+
+
+def _counting_server(handler) -> tuple[ServiceServer[Any, Any], list[None]]:
+    calls: list[None] = []
+    server = ServiceServer(
+        DOUBLE,
+        DOUBLE.key,
+        handler,
+        asyncio.get_running_loop(),
+        on_served=lambda: calls.append(None),
+    )
+    return server, calls
+
+
+async def test_on_served_fires_after_a_successful_reply():
+    server, calls = _counting_server(double)
+    await server._reply(fake_query(), b'{"value":1}')
+    assert len(calls) == 1
+
+
+async def test_on_served_does_not_fire_for_a_bad_request():
+    server, calls = _counting_server(double)
+    await server._reply(fake_query(), b"not json")
+    assert calls == []
+
+
+async def test_on_served_does_not_fire_when_the_handler_raises():
+    def boom(req: Req) -> Rep:
+        raise RuntimeError("axis did not answer")
+
+    server, calls = _counting_server(boom)
+    await server._reply(fake_query(), b'{"value":1}')
+    assert calls == []

@@ -10,17 +10,9 @@ testing
 cli
 conventions
 open-telemetry
+sovd
 shared-memory
 api/index
-```
-
-```{toctree}
-:hidden:
-:caption: Design notes
-
-design/live-topics
-design/node-measures
-design/opensovd-adapter
 ```
 
 zenode is a typed node framework for distributed robot systems on
@@ -129,8 +121,7 @@ repository contains complete programs, each runnable as-is:
 | Example | Shows |
 |---|---|
 | `contract.py`, `talker.py`, `listener.py` | Typed pub/sub and a service call between two processes; the recommended starting point for a new contract |
-| `otel_pipeline.py` | A traced three-node pipeline exporting spans to an OpenTelemetry backend |
-| `shm_camera.py` | Shared-memory publishing, with `--plain` to compare against the normal path |
+| `rover/` | A simulated robot of seven nodes sharing one contract and one `zenode.toml`: a motor watchdog, a latched emergency stop, wildcard range sensors, shared-memory camera frames, backpressure, runtime-writable settings, tracing, and tests. Its README walks through every CLI command against the running system |
 
 ## What the runtime guarantees
 
@@ -148,16 +139,3 @@ repository contains complete programs, each runnable as-is:
 
 Read [Contracts](contracts.md) first, since it is the part two processes must
 agree on. [Nodes](nodes.md) covers everything a single process does.
-
-## Design notes
-
-Where a design was taken, the note keeps its trade-offs and rejected
-alternatives, the reasoning the code no longer states. Where it was not, the
-note records a proposal, so the decision can still be taken or dropped on
-purpose. The status line at the top of each says which it is.
-
-| Note | Status | Question it answers |
-|---|---|---|
-| [Live topic discovery](design/live-topics.md) | partly built | How to see what is actually on the bus right now, and how it differs from the contract |
-| [Node-defined measurements](design/node-measures.md) | built | How an application puts its own numbers on the heartbeat, and what identifies the machine a node runs on |
-| [OpenSOVD adapter](design/opensovd-adapter.md) | proposal | Whether zenode should speak [ISO 17978](https://www.iso.org/standard/86587.html) vehicle diagnostics, and what that would cost |

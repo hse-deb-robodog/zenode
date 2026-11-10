@@ -159,18 +159,26 @@ reclaim less often.
 
 ## Example
 
-`examples/shm_camera.py` publishes 1080p frames between two processes and takes
-`--plain` to run the identical pipeline without shared memory:
+In `examples/rover`, `camera` publishes 0.9 MB frames to `detector` through
+shared memory and reports its mean `put()` time as the `publish_ms` metric:
 
 ```bash
-python examples/shm_camera.py camera      # and: detector
-python examples/shm_camera.py camera --plain
+uv run python -m examples.rover camera
+uv run python -m examples.rover detector
+ZENODE_CONFIG=examples/rover/zenode.toml uv run zenode health camera
 ```
 
+To run the identical pipeline without shared memory, start both nodes with
+`ZENODE_TRANSPORT__SHARED_MEMORY=false`. The camera then logs that the topic
+declares `shm=True` while the transport does not, and publishes through the
+normal path. One run of each on a desktop machine:
+
 ```
---plain    publish median 1.83 ms    receive age 1.38 ms
-shm        publish median 0.27 ms    receive age 0.42 ms
+shared memory off    publish_ms 0.17
+shared memory on     publish_ms 0.06
 ```
+
+The gap grows with the frame size, since the normal path copies every byte.
 
 ---
 

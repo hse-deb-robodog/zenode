@@ -511,3 +511,20 @@ async def test_on_matching_binds_an_imperative_publisher():
                 break
             await asyncio.sleep(0.02)
         assert node.streaming == [False]
+
+
+def test_publish_refuses_a_wildcard_topic_at_class_definition():
+    """Caught before start(), where hardware may already have been acquired."""
+    with pytest.raises(ContractError, match="wildcard"):
+
+        class _Fanout(Node):
+            name = "fanout"
+            out = publish(Topic("sensors/*/temp", Ping))
+
+
+def test_imperative_publisher_refuses_a_wildcard_topic():
+    class _Plain(Node):
+        name = "plain"
+
+    with pytest.raises(ContractError, match="wildcard"):
+        _Plain().publisher(Topic("state/**", Ping))

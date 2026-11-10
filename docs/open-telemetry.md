@@ -142,7 +142,7 @@ def setup_telemetry(service_name: str) -> None:
 zenode records three spans (`publish <key>`, `process <key>` and
 `serve <key>`) carrying OpenTelemetry messaging semantic conventions. It does
 not construct a `TracerProvider`, select an exporter, or read `OTEL_*`
-variables. See `examples/otel_pipeline.py` for a complete configuration.
+variables. See `examples/rover/telemetry.py` for a complete configuration.
 
 Application spans nest normally. A message published inside one is parented on
 it, and the trace context on the wire identifies it, so downstream nodes chain
@@ -172,7 +172,7 @@ Discards are reported as `NodeHealth.logs_dropped` and flagged by
 |------------|-------------------------------------------------------------------------|
 | Identity   | `node`, `host`, `state`                                                 |
 | Traffic    | `sent`, `received`                                                      |
-| Errors     | `handler_errors`                                                        |
+| Errors     | `handler_errors`, `deadline_misses`                                     |
 | Saturation | `dropped`, `stale`, `timer_overruns`, `queue_max_depth`, `logs_dropped`, `shm_fallbacks` |
 | Latency    | `age_mean_ms`, `age_max_ms`, `handler_mean_ms`, `handler_max_ms`        |
 | Resources  | `cpu_percent`, `rss_bytes`                                              |
@@ -321,7 +321,7 @@ rate(zenode_exporter_metric_pushes_total{outcome="failed"}[5m]) > 0
 | Command                                             | Purpose                                       |
 |-----------------------------------------------------|-----------------------------------------------|
 | `zenode logs [--node] [--level] [--trace] [--grep]` | Follow log records from every node.           |
-| `zenode health [--watch]`                           | Table of every node's heartbeat.              |
+| `zenode health [NODE] [--watch]`                    | Table of every node's heartbeat.              |
 | `zenode trace <trace-id>`                           | Reconstruct one trace from every node's ring. |
 | `zenode export`                                     | Forward health and logs to external systems.  |
 | `zenode nodes`, `topics`, `echo`, `hz`, `doctor`    | General inspection.                           |

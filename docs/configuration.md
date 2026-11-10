@@ -21,8 +21,10 @@ max-speed = 0.5
 wheel-radius = 0.0485
 ```
 
-A missing file means defaults: peer mode with multicast scouting, which works
-on a LAN with no configuration at all.
+With no `./zenode.toml`, defaults apply: peer mode with multicast scouting,
+which works on a LAN with no configuration at all. A file that is named
+explicitly, through `$ZENODE_CONFIG` or `run(config_path=…)`, must exist; a
+missing one raises `ConfigError`.
 
 ## Precedence
 
@@ -34,9 +36,20 @@ Lowest to highest:
 
 Environment names are derived from the section: `ZENODE_TRANSPORT__CONNECT`,
 `ZENODE_NAV__MAX_SPEED`, `ZENODE_GEOMETRY__WHEEL_RADIUS`. The double underscore
-separates section from field.
+separates section from field, and a further one descends into a nested model:
+`ZENODE_NAV__PID__KP` sets `kp` in `[node.nav.pid]`.
+
+An environment value is parsed as JSON when it parses (`0.5`, `true`,
+`["a", "b"]`). Otherwise a value containing a comma becomes a list
+(`tcp/a:7447,tcp/b:7447`), and anything else stays a string. A list with one
+element has no comma, so write it as JSON: `ZENODE_TRANSPORT__CONNECT='["tcp/a:7447"]'`.
+A string field
+whose value looks like a number therefore needs JSON quotes:
+`ZENODE_CAM__DEVICE='"0"'`.
 
 Keys may be written `max-speed` or `max_speed`; both resolve to the same field.
+Unknown keys in `[transport]` and `[node.*]` are rejected at load, whether they
+come from the file or the environment, so a typo fails at startup.
 
 ## Node configuration
 
@@ -65,6 +78,22 @@ from it by name:
 async def tick(self) -> None: ...
 ```
 
+## Changing settings at runtime
+
+Configuration is loaded once, before the node starts. Nothing watches the file
+or the environment afterwards.
+
+A setting can be changed at runtime only if the node declares a
+`diagnostic="write"` service for it. The handler validates the value, applies
+it, and replaces `self.config` (see [Contracts](contracts.md#service)). A node
+with `describe_config = True` carries its current config on its descriptor,
+which shows the change after the next heartbeat (see [Nodes](nodes.md) and
+[the SOVD page](sovd.md)).
+
+A runtime change lives in memory. It is not written back to the TOML file, and
+a restart returns the node to what the file and the environment say.
+In `examples/rover`, `drive.py` serves such a write and `mission.py` calls it.
+
 ## Transport
 
 ```toml
@@ -84,7 +113,7 @@ timestamping = true
 | `mode` | `peer` | `peer` discovers others directly; `client` connects to a router. |
 | `connect` | `[]` | Endpoints to dial. |
 | `listen` | `[]` | Endpoints to accept on. |
-| `namespace` | `""` | Prefixed to every relative key. |
+| `namespace` | `""` | Prefixed to every relative key. Segments separated by `/`, each matching `[A-Za-z0-9_.-]+`; `fleet/robot1` is fine, `fleet/*` is rejected at load. |
 | `host` | `""` | The machine a node reports running on. Empty means `socket.gethostname()`. |
 | `multicast_scouting` | `true` | Automatic discovery on a LAN. |
 | `shared_memory` | `false` | See [Shared memory](shared-memory.md). |
@@ -130,6 +159,14 @@ geometry = load_section(Geometry, "geometry")
 `load_section` follows the same precedence and supports `ZENODE_GEOMETRY__*`.
 Two nodes computing odometry from the same wheel radius should read it from one
 place. See [Conventions](conventions.md) for what belongs there.
+
+A plain `BaseModel` such as `Geometry` ignores unknown keys. Set
+`model_config = ConfigDict(extra="forbid")` on it to have a typo rejected, as
+node sections are.
+
+A dotted path reads a subtable: `load_section(Limits, "geometry.limits")` reads
+`[geometry.limits]`. Its environment prefix comes from the last segment
+(`ZENODE_LIMITS__*`); pass `env_section=` to choose another.
 
 ## Logging
 

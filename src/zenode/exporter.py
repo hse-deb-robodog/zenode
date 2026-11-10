@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .msgs.health import NodeHealth
+from .msgs.health import RUNTIME_BY_ID, NodeHealth
 from .msgs.info import MeasureDescriptor, NodeInfo
 
 logger = logging.getLogger(__name__)
@@ -78,13 +78,16 @@ class Metric:
 
     Shared by the Prometheus and OTLP paths on purpose: two tables would drift,
     and a field exported by one and not the other is the kind of gap nobody
-    notices until a dashboard is silently missing a series.
+    notices until a dashboard is silently missing a series. What the field
+    *means* — kind, help, integral — comes from the runtime's own catalog,
+    :data:`zenode.msgs.health.RUNTIME_MEASURES`, so this row only adds the two
+    series names and the unit conversion; a third consumer reads the catalog
+    off the bus and needs no table at all.
     """
 
     name: str
     """Prometheus name, without the ``zenode_node_`` prefix."""
-    kind: str
-    help: str
+    descriptor: MeasureDescriptor
     value: Callable[[NodeHealth], float | None]
     """``None`` omits the series rather than reporting zero: a node with no
     ``/proc`` has unknown CPU, and unknown is not idle."""
@@ -92,152 +95,108 @@ class Metric:
     """OTLP name, dotted per OpenTelemetry convention. Collectors normalise it
     back to the Prometheus form, so both paths land on one series."""
     unit: str
-    """UCUM, as OTLP expects: ``s``, ``By``, ``%``, or ``{thing}`` for a count."""
-    integral: bool = False
-    """Whether the value is a whole number, which OTLP encodes differently."""
+    """UCUM, as *exported*: ``s`` where the wire field is ``ms``, because
+    Prometheus wants base units and ``value`` does the conversion."""
+
+    @property
+    def kind(self) -> str:
+        return self.descriptor.kind
+
+    @property
+    def help(self) -> str:
+        return self.descriptor.description
+
+    @property
+    def integral(self) -> bool:
+        return self.descriptor.integral
+
+
+def _row(
+    name: str, id_: str, value: Callable[[NodeHealth], float | None], otlp: str, unit: str
+) -> Metric:
+    return Metric(name, RUNTIME_BY_ID[id_], value, otlp, unit)
 
 
 # Counters are cumulative since node start. Prometheus detects the reset when a
 # node restarts, which is exactly the semantics these have.
 COUNTERS: tuple[Metric, ...] = (
-    Metric(
-        "sent_total",
-        "counter",
-        "Messages published.",
-        lambda h: h.sent,
-        "zenode.node.sent",
-        "{message}",
-        integral=True,
-    ),
-    Metric(
-        "received_total",
-        "counter",
-        "Messages received.",
-        lambda h: h.received,
-        "zenode.node.received",
-        "{message}",
-        integral=True,
-    ),
-    Metric(
-        "dropped_total",
-        "counter",
-        "Messages dropped by a full queue.",
-        lambda h: h.dropped,
-        "zenode.node.dropped",
-        "{message}",
-        integral=True,
-    ),
-    Metric(
-        "stale_total",
-        "counter",
-        "Messages dropped past max_age.",
-        lambda h: h.stale,
-        "zenode.node.stale",
-        "{message}",
-        integral=True,
-    ),
-    Metric(
+    _row("sent_total", "sent", lambda h: h.sent, "zenode.node.sent", "{message}"),
+    _row("received_total", "received", lambda h: h.received, "zenode.node.received", "{message}"),
+    _row("dropped_total", "dropped", lambda h: h.dropped, "zenode.node.dropped", "{message}"),
+    _row("stale_total", "stale", lambda h: h.stale, "zenode.node.stale", "{message}"),
+    _row(
         "handler_errors_total",
-        "counter",
-        "Exceptions raised inside subscription, service and timer handlers.",
+        "handler_errors",
         lambda h: h.handler_errors,
         "zenode.node.handler_errors",
         "{error}",
-        integral=True,
     ),
-    Metric(
+    _row(
         "timer_overruns_total",
-        "counter",
-        "Timer deadlines missed because a body outran its interval.",
+        "timer_overruns",
         lambda h: h.timer_overruns,
         "zenode.node.timer_overruns",
         "{overrun}",
-        integral=True,
     ),
-    Metric(
+    _row(
+        "deadline_misses_total",
+        "deadline_misses",
+        lambda h: h.deadline_misses,
+        "zenode.node.deadline_misses",
+        "{miss}",
+    ),
+    _row(
         "shm_fallbacks_total",
-        "counter",
-        "Messages on a shm=True topic that published through the normal path.",
+        "shm_fallbacks",
         lambda h: h.shm_fallbacks,
         "zenode.node.shm_fallbacks",
         "{message}",
-        integral=True,
     ),
-    Metric(
+    _row(
         "logs_dropped_total",
-        "counter",
-        "Log records dropped before publishing, leaving `zenode logs` incomplete.",
+        "logs_dropped",
         lambda h: h.logs_dropped,
         "zenode.node.logs_dropped",
         "{record}",
-        integral=True,
     ),
 )
 
 # Base units, per Prometheus convention: seconds and bytes, never milliseconds.
 GAUGES: tuple[Metric, ...] = (
-    Metric(
-        "uptime_seconds",
-        "gauge",
-        "Time since this node started.",
-        lambda h: h.uptime_s,
-        "zenode.node.uptime",
-        "s",
-    ),
-    Metric(
-        "cpu_percent",
-        "gauge",
-        "Process CPU since the last heartbeat, as a percentage of one core.",
-        lambda h: h.cpu_percent,
-        "zenode.node.cpu",
-        "%",
-    ),
-    Metric(
-        "rss_bytes",
-        "gauge",
-        "Process resident set size.",
-        lambda h: h.rss_bytes,
-        "zenode.node.rss",
-        "By",
-        integral=True,
-    ),
-    Metric(
+    _row("uptime_seconds", "uptime_s", lambda h: h.uptime_s, "zenode.node.uptime", "s"),
+    _row("cpu_percent", "cpu_percent", lambda h: h.cpu_percent, "zenode.node.cpu", "%"),
+    _row("rss_bytes", "rss_bytes", lambda h: h.rss_bytes, "zenode.node.rss", "By"),
+    _row(
         "queue_max_depth",
-        "gauge",
-        "Deepest any subscription queue got since the last heartbeat.",
+        "queue_max_depth",
         lambda h: h.queue_max_depth,
         "zenode.node.queue_max_depth",
         "{message}",
-        integral=True,
     ),
-    Metric(
+    _row(
         "message_age_mean_seconds",
-        "gauge",
-        "Publish-to-dequeue delay, mean over the last heartbeat interval.",
+        "age_mean_ms",
         lambda h: h.age_mean_ms / 1000.0,
         "zenode.node.message_age_mean",
         "s",
     ),
-    Metric(
+    _row(
         "message_age_max_seconds",
-        "gauge",
-        "Publish-to-dequeue delay, worst case over the last heartbeat interval.",
+        "age_max_ms",
         lambda h: h.age_max_ms / 1000.0,
         "zenode.node.message_age_max",
         "s",
     ),
-    Metric(
+    _row(
         "handler_duration_mean_seconds",
-        "gauge",
-        "Time spent inside handlers, mean over the last heartbeat interval.",
+        "handler_mean_ms",
         lambda h: h.handler_mean_ms / 1000.0,
         "zenode.node.handler_duration_mean",
         "s",
     ),
-    Metric(
+    _row(
         "handler_duration_max_seconds",
-        "gauge",
-        "Time spent inside handlers, worst case over the last heartbeat interval.",
+        "handler_max_ms",
         lambda h: h.handler_max_ms / 1000.0,
         "zenode.node.handler_duration_max",
         "s",

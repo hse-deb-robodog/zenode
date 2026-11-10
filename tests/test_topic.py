@@ -8,12 +8,13 @@ from zenode import (
     Topic,
     TopicSet,
     find_topic,
+    is_wildcard,
     registered_entries,
     registered_services,
     registered_topics,
 )
 from zenode.errors import ContractError
-from zenode.topic import PRIORITIES
+from zenode.topic import PRIORITIES, validate_namespace, validate_node_name
 
 
 class Msg(BaseModel):
@@ -117,3 +118,100 @@ def test_qos_rejects_an_unknown_congestion_control():
     unsupported: Any = "block_first"
     with pytest.raises(ContractError, match="congestion_control must be one of"):
         Topic("q/d", Msg, congestion_control=unsupported)
+
+
+# --------------------------------------------------------------------- diagnostic
+
+
+class _NoFields(BaseModel):
+    pass
+
+
+class _WithField(BaseModel):
+    axis: int = 0
+
+
+def test_services_are_not_diagnosable_by_default():
+    """Exposure to a diagnostic client is a deliberate act, so the default is off."""
+    svc = Service("state/get_pose", request=_NoFields, reply=Msg)
+    assert svc.diagnostic is None
+
+
+def test_a_read_needs_a_request_without_fields():
+    """A SOVD data resource is a GET with no body; a read with arguments has nowhere to put them."""
+    Service("state/get_pose", request=_NoFields, reply=Msg, diagnostic="read")
+    with pytest.raises(ContractError, match="no fields"):
+        Service("state/get_pose", request=_WithField, reply=Msg, diagnostic="read")
+
+
+def test_a_read_rejects_a_raw_request():
+    """``bytes`` has no field list to be empty."""
+    with pytest.raises(ContractError, match="no fields"):
+        Service("state/blob", request=bytes, reply=bytes, diagnostic="read")
+
+
+def test_an_operation_may_take_arguments():
+    svc = Service("motion/home", request=_WithField, reply=Msg, diagnostic="operation")
+    assert svc.diagnostic == "operation"
+
+
+def test_an_unknown_diagnostic_is_a_contract_error():
+    bad: Any = "write"  # the Literal is for checkers; the dataclass still guards at runtime
+    with pytest.raises(ContractError, match="diagnostic"):
+        Service("x/y", request=_NoFields, reply=Msg, diagnostic=bad)
+
+
+# --------------------------------------------------------------- names and namespaces
+
+
+@pytest.mark.parametrize("name", ["nav", "arm-left", "cam.front", "Nav_2", "zenode-test-probe"])
+def test_good_node_names(name):
+    validate_node_name(name, what="Node")
+
+
+@pytest.mark.parametrize("name", ["", "arm/left", "nav*", "a b", "nav?", "nav#1", "nav%", "näv"])
+def test_bad_node_names(name):
+    """A name becomes a key segment and, for diagnostics, a URL path segment."""
+    with pytest.raises(ContractError, match="name"):
+        validate_node_name(name, what="Node")
+
+
+@pytest.mark.parametrize("namespace", ["", "robodog", "fleet/robot1", "a.b/c-d"])
+def test_good_namespaces(namespace):
+    validate_namespace(namespace, what="transport")
+
+
+@pytest.mark.parametrize("namespace", ["/robodog", "robodog/", "a//b", "a b", "fleet/*", "ns?"])
+def test_bad_namespaces(namespace):
+    with pytest.raises(ContractError, match="namespace"):
+        validate_namespace(namespace, what="transport")
+
+
+def test_a_write_takes_a_typed_body():
+    svc = Service("motion/max_speed", request=_WithField, reply=Msg, diagnostic="write")
+    assert svc.diagnostic == "write"
+
+
+@pytest.mark.parametrize("request_type", [_NoFields, bytes], ids=["no-fields", "bytes"])
+def test_a_write_without_a_typed_body_is_a_contract_error(request_type):
+    """A PUT body is JSON validated against a schema; nothing to write is an operation."""
+    with pytest.raises(ContractError, match="diagnostic='write'"):
+        Service("motion/max_speed", request=request_type, reply=bytes, diagnostic="write")
+
+
+@pytest.mark.parametrize(
+    "key,expected",
+    [
+        ("state/odom", False),
+        ("sensors/*/temp", True),
+        ("state/**", True),
+        ("arm_$*/joint", True),
+    ],
+)
+def test_is_wildcard(key, expected):
+    assert is_wildcard(key) is expected
+
+
+def test_a_wildcard_topic_is_a_valid_contract_entry():
+    """Subscribing to many keys is legitimate; only publishing on one is not."""
+    assert Topic("sensors/*/temp", Msg).key == "sensors/*/temp"

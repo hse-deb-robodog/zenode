@@ -12,6 +12,7 @@ process-wide registry, which powers the CLI (``zenode topics``, typed
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, get_args
@@ -46,6 +47,17 @@ PRIORITIES: tuple[Priority, ...] = get_args(Priority)
 
 CONGESTION_CONTROLS: tuple[CongestionControl, ...] = get_args(CongestionControl)
 
+Diagnostic = Literal["read", "write", "operation"]
+"""How a diagnostic client may reach a service. ``"read"`` is served as a
+side-effect-free data resource (an HTTP GET); ``"write"`` is an idempotent
+state change with a typed body (an HTTP PUT) whose handler decides what
+changes; ``"operation"`` is an action and is only ever reachable by an
+explicit POST. ``None``, the default on
+:class:`Service`, means the service is not exposed at all — what a robot shows
+a diagnostic client is a decision for the contract, not a sidecar's config."""
+
+DIAGNOSTICS: tuple[Diagnostic, ...] = get_args(Diagnostic)
+
 
 def _validate_key(key: str, *, what: str) -> None:
     if not key:
@@ -56,6 +68,64 @@ def _validate_key(key: str, *, what: str) -> None:
         raise ContractError(f"{what}: key {key!r} contains an empty segment")
     if any(ch.isspace() for ch in key):
         raise ContractError(f"{what}: key {key!r} contains whitespace")
+
+
+def is_wildcard(key: str) -> bool:
+    """Whether ``key`` is a zenoh key *expression* rather than one concrete key.
+
+    zenoh only allows ``*`` as part of a wildcard (``*``, ``**``, ``$*``) —
+    a literal asterisk is not a valid key character — so the check needs no
+    parser, which keeps this module free of zenoh. A wildcard topic is fine
+    to subscribe and never fine to publish: a put on ``sensors/*/temp`` would
+    land on every sensor's key at once.
+    """
+    return "*" in key
+
+
+def reject_wildcard_publish(key: str, *, what: str) -> None:
+    """Raise :class:`ContractError` if ``key`` cannot name one publication."""
+    if is_wildcard(key):
+        raise ContractError(
+            f"{what}: cannot publish on wildcard key {key!r} — a publisher needs one "
+            "concrete key; wildcards are for subscribing"
+        )
+
+
+NAME_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
+"""What a node name and each namespace segment may be. Stricter than
+:func:`_validate_key` on purpose: a name becomes a segment of every reserved
+key (``node/<name>/health``) and, for diagnostic tooling, a URL path segment,
+and neither can carry ``/``, zenoh's ``*`` and ``$*`` wildcards, or the URL
+delimiters ``?``, ``#`` and ``%``. Measure ids already take the same stance
+for the same reason."""
+
+
+def validate_node_name(name: str, *, what: str) -> None:
+    """Reject a node name that cannot be a key segment or a path segment."""
+    if not name:
+        raise ContractError(f"{what}: name must not be empty")
+    if not NAME_SEGMENT.match(name):
+        raise ContractError(
+            f"{what}: name {name!r} must match {NAME_SEGMENT.pattern} — "
+            "one segment, no '/', wildcards or URL delimiters"
+        )
+
+
+def validate_namespace(namespace: str, *, what: str) -> None:
+    """Reject a namespace whose segments cannot be key or path segments.
+
+    Empty is allowed and means "no prefix". Segments are separated by ``/``,
+    so ``fleet/robot1`` is fine and ``fleet/*`` is not.
+    """
+    if not namespace:
+        return
+    _validate_key(namespace, what=f"{what} namespace")
+    for segment in namespace.split("/"):
+        if not NAME_SEGMENT.match(segment):
+            raise ContractError(
+                f"{what}: namespace {namespace!r} has segment {segment!r}, "
+                f"which must match {NAME_SEGMENT.pattern}"
+            )
 
 
 def resolve_key(key: str, namespace: str, *, absolute: bool = False) -> str:
@@ -184,7 +254,32 @@ class Topic(Generic[T]):
 
 @dataclass(frozen=True)
 class Service(Generic[Req, Rep]):
-    """A request/reply endpoint, served over a zenoh queryable."""
+    """A request/reply endpoint, served over a zenoh queryable.
+
+    Args:
+        key: Hierarchical key, relative to the deployment namespace.
+        request: Request payload type — a Pydantic model, or ``bytes``.
+        reply: Reply payload type.
+        request_codec: Wire format for the request. Defaults per ``request``.
+        reply_codec: Wire format for the reply. Defaults per ``reply``.
+        description: One line for humans; published on the node's descriptor
+            and shown by diagnostic tooling.
+        diagnostic: Whether, and how, a diagnostic client (the SOVD sidecar)
+            may call this service. ``"read"`` becomes a data resource reachable
+            by GET, so its ``request`` must be a model with no fields — a GET
+            has no body, and a read that takes arguments would need a second
+            serialization path nobody asked for. ``"write"`` is reachable by
+            PUT: its ``request`` must be a model with at least one field (the
+            body is JSON validated against its schema, and a write with
+            nothing to write is an operation). The handler owns the write —
+            zenode never applies a body to ``NodeConfig`` itself, which would
+            make it a parameter server — and a successful call republishes the
+            node's descriptor. ``"operation"`` may act and
+            is never reachable by GET. ``None`` is not exposed. A single
+            tri-state rather than a ``read_only`` flag because a boolean
+            conflates "safe to GET" with "externally visible", and visibility
+            is the deliberate act.
+    """
 
     key: str
     request: type[Req]
@@ -192,10 +287,34 @@ class Service(Generic[Req, Rep]):
     request_codec: Codec[Req] = _CODEC_UNSET
     reply_codec: Codec[Rep] = _CODEC_UNSET
     description: str = ""
+    diagnostic: Diagnostic | None = None
     is_absolute: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
-        _validate_key(self.key, what=f"Service({self.key!r})")
+        what = f"Service({self.key!r})"
+        _validate_key(self.key, what=what)
+        if self.diagnostic is not None and self.diagnostic not in DIAGNOSTICS:
+            raise ContractError(
+                f"{what}: diagnostic must be one of {DIAGNOSTICS} or None, got {self.diagnostic!r}"
+            )
+        if self.diagnostic == "read":
+            # `model_fields` is pydantic's; `bytes` has none, and a model with
+            # any is a read with arguments. `zenode.msgs.Empty` is the canonical
+            # no-field request — named here rather than imported, because
+            # `msgs` imports this module.
+            fields: dict[str, Any] | None = getattr(self.request, "model_fields", None)
+            if fields is None or fields:
+                raise ContractError(
+                    f"{what}: diagnostic='read' needs a request model with no fields "
+                    f"(zenode.msgs.Empty), got {self.request.__name__}"
+                )
+        if self.diagnostic == "write":
+            fields = getattr(self.request, "model_fields", None)
+            if not fields:
+                raise ContractError(
+                    f"{what}: diagnostic='write' needs a request model with at least one "
+                    f"field, got {self.request.__name__}"
+                )
         if self.request_codec is None:
             object.__setattr__(self, "request_codec", default_codec(self.request))
         if self.reply_codec is None:

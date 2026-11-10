@@ -63,8 +63,12 @@ class ServiceServer(Generic[Req, Rep]):
         log: logging.Logger = logger,
         node_name: str = "",
         ring: TraceRing | None = None,
+        on_served: Callable[[], None] | None = None,
     ) -> None:
         self.service = service
+        # Called after each successful reply only: a rejected or failed call
+        # changed nothing worth reporting.
+        self._on_served = on_served
         self.key = key
         self._node_name = node_name
         self._ring = ring
@@ -140,6 +144,8 @@ class ServiceServer(Generic[Req, Rep]):
                 encoding=self.service.reply_codec.encoding,
             )
             self.served += 1
+            if self._on_served is not None:
+                self._on_served()
         finally:
             with contextlib.suppress(Exception):
                 query.drop()

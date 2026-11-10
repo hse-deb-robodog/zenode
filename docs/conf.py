@@ -45,7 +45,7 @@ intersphinx_mapping = {
 
 templates_path = []
 # docs/agents/ is agent-workflow configuration, not user documentation.
-exclude_patterns = ["_build", "agents"]
+exclude_patterns = ["_build", "agents", "adr"]
 
 html_theme = "furo"
 html_title = f"zenode {release}"

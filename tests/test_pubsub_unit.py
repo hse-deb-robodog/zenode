@@ -49,9 +49,15 @@ class FakeInner:
         self.undeclared = True
 
 
-def zenoh_sample(payload: bytes, attachment: bytes | None = None, kind=zenoh.SampleKind.PUT) -> Any:
+def zenoh_sample(
+    payload: bytes,
+    attachment: bytes | None = None,
+    kind=zenoh.SampleKind.PUT,
+    key: str = "test/ping",
+) -> Any:
     return SimpleNamespace(
         kind=kind,
+        key_expr=key,
         payload=SimpleNamespace(to_bytes=lambda: payload),
         attachment=None if attachment is None else SimpleNamespace(to_bytes=lambda: attachment),
     )
@@ -203,15 +209,37 @@ async def test_the_zenoh_callback_hands_payload_and_envelope_to_the_loop():
     assert (envelope.node, envelope.seq) == ("talker", 1)
 
 
+async def test_the_envelope_carries_the_concrete_key_a_wildcard_matched():
+    """On ``sensors/*/temp`` the handler has to learn *which* sensor spoke."""
+    seen: list[Envelope] = []
+    sub = make_subscription(lambda _msg, env: seen.append(env), topic=Topic("sensors/*/temp", Ping))
+    sub._zenoh_callback(zenoh_sample(b'{"value":1}', key="sensors/lidar/temp"))
+    await asyncio.sleep(0)
+
+    _, envelope = await sub._next()
+    assert envelope.key == "sensors/lidar/temp"
+    await sub._dispatch(Ping(value=1), envelope)
+    assert seen[0].key == "sensors/lidar/temp"
+
+
+async def test_a_foreign_sample_still_reports_its_key():
+    """No attachment means no sender metadata, but the key is zenoh's, not the sender's."""
+    sub = make_subscription(print)
+    sub._zenoh_callback(zenoh_sample(b"{}", key="test/ping"))
+    await asyncio.sleep(0)
+    _, envelope = await sub._next()
+    assert (envelope.node, envelope.key) == (None, "test/ping")
+
+
 async def test_the_envelope_is_decoded_once_per_sample(monkeypatch: pytest.MonkeyPatch):
     """The queue carries the decoded Envelope so _consume never re-parses it."""
     calls = 0
     real = pubsub.decode_envelope
 
-    def counting(data: bytes | None) -> Envelope:
+    def counting(data: bytes | None, key: str | None = None) -> Envelope:
         nonlocal calls
         calls += 1
-        return real(data)
+        return real(data, key)
 
     monkeypatch.setattr(pubsub, "decode_envelope", counting)
     received: list[Ping] = []

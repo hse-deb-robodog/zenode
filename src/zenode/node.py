@@ -63,7 +63,14 @@ from .reporting import Reporter, ReporterSources
 from .service import ServiceHandler, ServiceServer, call_service
 from .shm import DEFAULT_POOL_BYTES, ShmPool
 from .timers import OnTimerError, Timer, resolve_interval
-from .topic import Service, Topic, resolve_key
+from .topic import (
+    Service,
+    Topic,
+    reject_wildcard_publish,
+    resolve_key,
+    validate_namespace,
+    validate_node_name,
+)
 from .trace import TraceRing
 
 T = TypeVar("T")
@@ -106,6 +113,7 @@ _OVERRIDE_POINTS = frozenset(
     {
         "name",
         "config",
+        "describe_config",
         "on_start",
         "on_stop",
         "allow_duplicates",
@@ -179,6 +187,19 @@ class Node:
     the hardware is released either way; what the bound buys is a log line
     naming the tasks that overstayed."""
 
+    describe_config: ClassVar[bool] = False
+    """Publish ``self.config`` and its JSON Schema on the node's latched
+    descriptor (:attr:`zenode.msgs.NodeInfo.config`), where diagnostic tooling
+    such as ``zenode-sovd`` serves it read-only.
+
+    Off by default because settings are where credentials live, and what a
+    robot shows a diagnostic client is a deliberate act. Declare secrets as
+    ``SecretStr``: the dump masks them, a plain ``str`` goes out as written.
+    To make a setting adjustable, declare a ``diagnostic="write"`` service and
+    replace ``self.config`` in its handler; the next heartbeat republishes the
+    descriptor with the new value. A node with no ``config`` model that sets
+    this is refused at construction rather than silently describing nothing."""
+
     config: Any
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -225,6 +246,7 @@ class Node:
     ) -> None:
         if not self.name:
             raise ContractError(f"{type(self).__name__} must set a class-level `name`")
+        validate_node_name(self.name, what=type(self).__name__)
         if self.start_timeout is not None and self.start_timeout <= 0:
             raise ContractError(
                 f"{type(self).__name__}.start_timeout must be positive or None, "
@@ -237,6 +259,7 @@ class Node:
             )
         self.__transport = transport if transport is not None else TransportConfig()
         self.namespace = self.__transport.namespace if namespace is None else namespace
+        validate_namespace(self.namespace, what=type(self).__name__)
         self.__session: zenoh.Session | None = session
         self.__session_owned = session is None
         self.log = node_logger(self.name)
@@ -253,6 +276,11 @@ class Node:
                         f"node {self.name!r} requires configuration "
                         f"({model.__name__} has required fields): {e}"
                     ) from e
+        if self.describe_config and not isinstance(getattr(self, "config", None), BaseModel):
+            raise ContractError(
+                f"{type(self).__name__}.describe_config is set but the node has no "
+                f"config model to describe"
+            )
 
         self.__loop: asyncio.AbstractEventLoop | None = None
         self.__stop_event = asyncio.Event()
@@ -280,6 +308,7 @@ class Node:
                 name=self.name,
                 host=self.__transport.host or socket.gethostname(),
                 zenode_version=__version__,
+                health_interval=self.health_interval,
                 state=lambda: self.__state,
                 publishers=self.__publishers,
                 subscriptions=self.__subscriptions,
@@ -291,8 +320,13 @@ class Node:
                 metrics=collect_metrics(type(self)),
                 resolve=lambda attr: getattr(self, attr),
                 log=self.log,
+                config=self.__described_config,
             )
         )
+
+    def __described_config(self) -> BaseModel | None:
+        """The config the descriptor carries — ``None`` unless opted in."""
+        return self.config if self.describe_config else None
 
     # ------------------------------------------------------------------ hooks
 
@@ -721,6 +755,9 @@ class Node:
         return resolve_key(relative, self.namespace, absolute=absolute)
 
     def publisher(self, topic: Topic[T]) -> Publisher[T]:
+        # zenoh would accept the declaration and fan each put out to every
+        # matching key — never what a publisher of "the" value meant.
+        reject_wildcard_publish(topic.key, what=f"publisher {topic.key!r}")
         key = topic.resolve(self.namespace)
         # QoS is fixed at declaration, not per-put, and both publisher flavours
         # take the same three parameters — so the branches must not drift.
@@ -819,8 +856,19 @@ class Node:
         key = service.resolve(self.namespace)
         # Explicit type arguments: inference would otherwise solve Rep from the
         # handler's `Rep | Awaitable[Rep]` return and clash with Service's invariance.
+        # A successful write changed what the node is; marking the wiring
+        # makes the next beat republish the descriptor — at most once per beat
+        # however many writes arrive.
+        on_served = self.__reporter.mark_declared if service.diagnostic == "write" else None
         server = ServiceServer[Req, Rep](
-            service, key, handler, self.__loop, log=self.log, node_name=self.name, ring=self.__ring
+            service,
+            key,
+            handler,
+            self.__loop,
+            log=self.log,
+            node_name=self.name,
+            ring=self.__ring,
+            on_served=on_served,
         )
         inner = self.session.declare_queryable(key, server._zenoh_callback)
         server._attach(inner)

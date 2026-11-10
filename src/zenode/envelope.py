@@ -21,6 +21,15 @@ class Envelope:
     seq: int | None = None
     ts_ns: int | None = None
     traceparent: str | None = None
+    key: str | None = None
+    """The concrete key the sample arrived on, namespace included.
+
+    Not carried in the attachment — zenoh already delivers it with every
+    sample, so it costs no wire bytes. It is what tells a handler on a
+    wildcard topic (``sensors/*/temp``) *which* sensor spoke; on an exact
+    topic it is simply the topic's resolved key. ``None`` where there was no
+    sample, e.g. an envelope built by hand in a test.
+    """
 
     def age_s(self, now_ns: int | None = None) -> float | None:
         """Seconds since the sender stamped the message.
@@ -46,16 +55,20 @@ def encode_envelope(node: str, seq: int, ts_ns: int, traceparent: str | None = N
     return json.dumps(data, separators=(",", ":")).encode()
 
 
-def decode_envelope(data: bytes | None) -> Envelope:
-    """Tolerant decode: anything malformed or missing yields empty fields."""
+def decode_envelope(data: bytes | None, key: str | None = None) -> Envelope:
+    """Tolerant decode: anything malformed or missing yields empty fields.
+
+    ``key`` is the sample's received key; it is kept even when the attachment
+    is unusable, because a foreign publisher still published *somewhere*.
+    """
     if not data:
-        return Envelope()
+        return Envelope(key=key)
     try:
         raw = json.loads(data)
     except (ValueError, UnicodeDecodeError):
-        return Envelope()
+        return Envelope(key=key)
     if not isinstance(raw, dict):
-        return Envelope()
+        return Envelope(key=key)
     node = raw.get("n")
     seq = raw.get("s")
     ts_ns = raw.get("t")
@@ -65,4 +78,5 @@ def decode_envelope(data: bytes | None) -> Envelope:
         seq=seq if isinstance(seq, int) else None,
         ts_ns=ts_ns if isinstance(ts_ns, int) else None,
         traceparent=traceparent if isinstance(traceparent, str) else None,
+        key=key,
     )

@@ -27,7 +27,7 @@ Two tool caveats worth knowing before "fixing" what looks broken:
 - `ruff format .` also reformats Python snippets inside `docs/*.md`, which are hand-aligned.
   Scope it to `src tests examples`.
 - `uv run ty check` over the repo root reports one unresolved import in
-  `examples/otel_pipeline.py` (an OTLP exporter that is deliberately not a dependency).
+  `examples/rover/telemetry.py` (an OTLP exporter that is deliberately not a dependency).
   Scope it to `src tests`.
 
 Trying things end to end:

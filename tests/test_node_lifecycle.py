@@ -590,3 +590,18 @@ def test_run_exits_0_on_ctrl_c():
     with pytest.raises(SystemExit) as exit_info:
         run(Interrupted, transport=local_transport())
     assert exit_info.value.code == 0
+
+
+def test_a_node_name_must_be_a_single_safe_segment():
+    """`arm/left` passes key validation and then mis-parses in `node_name_from_key`."""
+
+    class Slashed(Quiet):
+        name = "arm/left"
+
+    with pytest.raises(ContractError, match="name"):
+        Slashed(transport=local_transport(""))
+
+
+def test_an_explicit_namespace_is_validated_too():
+    with pytest.raises(ContractError, match="namespace"):
+        Quiet(transport=local_transport(""), namespace="bad namespace")
