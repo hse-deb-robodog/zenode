@@ -1,6 +1,6 @@
 """drive: follows velocity commands and reports where the rover is.
 
-The node with the most to lose, so it shows the defensive half of zenode:
+This node moves the rover, so it uses most of zenode's failure handling:
 
 - ``max_age`` on the topic drops a command that is too old to act on, and a
   ``deadline`` on the subscription catches commands that stop arriving.
@@ -145,15 +145,16 @@ class Drive(Node):
 
     @serve(RoverServices.speed_limit)
     def on_speed_limit(self, req: SpeedLimit) -> SpeedLimit:
-        # The schema already rejected a non-positive value. What only this
-        # node knows is its chassis. Raising becomes an error reply.
+        # The schema already rejected a non-positive value. The chassis limit
+        # is this node's own check. Raising becomes an error reply.
         if req.max_speed > self.config.hard_max_speed:
             raise ValueError(
                 f"max_speed {req.max_speed} m/s exceeds the chassis limit "
                 f"of {self.config.hard_max_speed} m/s"
             )
-        # Replace, never mutate: every reader keeps a whole snapshot. After a
-        # successful write the descriptor is republished on the next heartbeat.
+        # Assign a new config object. Mutating the old one could show a reader
+        # a half-updated config. After a successful write the descriptor is
+        # republished on the next heartbeat.
         self.config = self.config.model_copy(update={"max_speed": req.max_speed})
         self.log.warning("max_speed set to %.2f m/s", req.max_speed)
         return SpeedLimit(max_speed=self.config.max_speed)

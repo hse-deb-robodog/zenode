@@ -2,10 +2,11 @@
 
     uv run pytest examples/rover -q
 
-Two kinds of test, and the split is the point (docs/testing.md):
+There are two kinds of test here (docs/testing.md):
 
 - The decorators only stamp metadata, so a handler is still an ordinary
-  method. A test about *logic* constructs the node and calls it. No session.
+  method. A test about *logic* constructs the node and calls it, with no
+  session.
 - A test about *message flow* uses ``harness()``: one in-process zenoh session
   with multicast off, so it needs no router and cannot reach a real robot.
 """
@@ -79,8 +80,8 @@ async def test_drive_moves_only_after_the_estop_is_released() -> None:
             assert (await poses.next()).x == 0.0
 
         h.publisher(RoverTopics.estop).put(EStop())
-        # Await the state under test, not a sleep. Commands keep flowing so
-        # the subscription's deadline stays satisfied.
+        # Wait on the pose itself, since a fixed sleep would be flaky. Commands
+        # keep flowing so the subscription's deadline stays satisfied.
         for _ in range(40):
             commands.put(FORWARD)
             if (await poses.next()).x > 0.0:

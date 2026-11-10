@@ -18,7 +18,7 @@ from zenode.msgs import Empty, Pose2D, Twist
 
 
 class Range(BaseModel):
-    """One range reading. The sensor's name is in the key, not the payload."""
+    """One range reading. The key names the sensor, so the payload does not."""
 
     meters: float
 
@@ -69,7 +69,7 @@ class RoverTopics(TopicSet):
     # Subscribe-only: `*` is one key segment, the sensor's name.
     ranges = Topic("sensors/*/range", Range, description="Every range sensor.")
     # Latched, so a node that starts after the stop was raised still learns of
-    # it. "block" because a lost stop is a fault, not a skipped sample; it
+    # it. "block", because a stop must not be dropped on a congested link. It
     # changes a few times a minute, so blocking the publisher is affordable.
     estop = Topic(
         "estop",

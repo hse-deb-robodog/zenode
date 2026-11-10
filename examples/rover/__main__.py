@@ -3,9 +3,8 @@
     uv run python -m examples.rover drive
     uv run python -m examples.rover mission 0.3
 
-Run it from the repository root, one terminal per node. This is deliberately
-not a launcher: zenode has none, and on a robot each node is its own systemd
-unit or container.
+Run it from the repository root, one terminal per node. zenode has no
+launcher. On a robot each node is its own systemd unit or container.
 """
 
 from __future__ import annotations
@@ -31,8 +30,8 @@ NODES: dict[str, type[Node]] = {
 
 
 def main() -> None:
-    # The rover's config sits next to its code, not in the working directory.
-    # Through the environment, so load_section() and the CLI find it too.
+    # zenode looks for ./zenode.toml by default, and the rover's config sits
+    # next to its code. Set through the environment so load_section() finds it.
     os.environ.setdefault("ZENODE_CONFIG", str(Path(__file__).with_name("zenode.toml")))
 
     args = sys.argv[1:]

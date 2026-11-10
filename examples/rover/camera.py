@@ -4,7 +4,7 @@
 ``shared_memory``, so a frame reaches a subscriber on this machine without
 being copied through a socket. If the pool is unavailable or exhausted the
 frame takes the normal path and is counted as ``shm_fallbacks`` on the
-heartbeat: slower, never lost. See docs/shared-memory.md.
+heartbeat. It still arrives, only more slowly. See docs/shared-memory.md.
 
 ``@on_matching`` is for producers that are expensive to *run*. With no
 subscriber the camera does not grab at all. Start ``detector`` and it begins;
@@ -67,7 +67,7 @@ class Camera(Node):
     @metric("publish_ms", unit="ms", description="Mean put() time since the last heartbeat.")
     def _publish_ms(self) -> float | None:
         if not self.puts:
-            return None  # unknown, which is not the same as zero
+            return None  # reported as unknown; 0.0 would be a false reading
         mean_ms = 1000 * self.put_seconds / self.puts
         self.put_seconds, self.puts = 0.0, 0
         return mean_ms

@@ -3,8 +3,8 @@
 "Inference" takes 50 ms and the camera delivers a frame every 33 ms, so this
 node cannot keep up, and the example is about what happens then. The
 subscription uses ``mode="queue"`` with a small ``queue_size``: when the queue
-is full the *oldest* frame is dropped and counted. Nothing blocks and nothing
-grows.
+is full the *oldest* frame is dropped and counted. The camera is never blocked
+and the queue never holds more than four frames.
 
 Watch it on the heartbeat::
 

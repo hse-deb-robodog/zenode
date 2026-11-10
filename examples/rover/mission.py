@@ -7,8 +7,8 @@ service, resets the odometry through the ``"operation"`` service, and stops.
 Try ``mission 9`` to see the refusal: ``drive`` raises, and the caller gets a
 ``ServiceError`` carrying the message instead of a silent timeout.
 
-This is a tool, not a fleet member, so it publishes no heartbeat. It takes a
-constructor argument, which is why ``__main__`` builds the instance itself.
+This is a one-shot tool, so it publishes no heartbeat. It takes a constructor
+argument, which is why ``__main__`` builds the instance itself.
 """
 
 from __future__ import annotations

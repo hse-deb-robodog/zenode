@@ -1,9 +1,10 @@
 """Optional: export the rover's spans to an OpenTelemetry backend.
 
 zenode records spans (``publish``, ``process``, ``serve``) but never builds a
-``TracerProvider``, picks an exporter or reads ``OTEL_*``. Where spans go is
-the application's decision, and this function is all of it. Without it, and
-without the ``otel`` extra, the span code is a strict no-op.
+``TracerProvider``, picks an exporter or reads ``OTEL_*``. The application
+decides where spans go, and this function is the whole of that setup. Unless
+the ``otel`` extra is installed and a provider is registered, the span code
+does nothing.
 
 Set ``OTLP_ENDPOINT`` to switch it on::
 

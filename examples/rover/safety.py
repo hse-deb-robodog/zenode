@@ -78,7 +78,7 @@ class Safety(Node):
         else:
             state = EStop()
         if state == self.published:
-            return  # latched: publish changes, not a stream
+            return  # latched, so publish only when the state changes
         self.published = state
         self.estop.put(state)
         if state.active:

@@ -75,7 +75,7 @@ safety  WARNING  estop released
 safety  WARNING  estop raised: obstacle at right
 ```
 
-It stays stopped until something moves it. That is `mission`:
+It stays stopped until `mission` moves it:
 
 ```bash
 uv run python -m examples.rover mission 0.3
@@ -91,7 +91,7 @@ it sets off again, slower.
 
 ## Things to try
 
-**Look at the contract and the data.**
+### Look at the contract and the data
 
 ```bash
 uv run zenode topics --contract examples.rover.contract
@@ -100,24 +100,32 @@ uv run zenode echo 'sensors/*/range' --contract examples.rover.contract
 uv run zenode hz 'sensors/**'
 ```
 
-Quote a wildcard key, or the shell expands it as a file glob. `hz` reports one
-rate per sensor, not a blend.
+Quote a wildcard key, or the shell expands it as a file glob. `hz` reports a
+separate rate for each sensor.
 
-**Stop `teleop`.** Within half a second `drive` logs
+### Stop `teleop`
+
+Within half a second `drive` logs
 `no velocity command for 0.5 s; stopping`, and `zenode health` counts it under
 `MISS`. Start `teleop` again and `drive` logs the resume.
 
-**Stop `rangers`.** `safety` raises the stop with
-`no range sensor is reporting`. No data is not the same as no obstacle.
+### Stop `rangers`
 
-**Restart `drive` while the stop is raised.** It logs the stop as soon as it
+`safety` raises the stop with
+`no range sensor is reporting`, because it treats missing readings as unsafe.
+
+### Restart `drive` while the stop is raised
+
+It logs the stop as soon as it
 is up, because `estop` is latched. It also restarts at the origin, so `safety`
 then releases it.
 
-**Start a second `safety`.** It refuses to start (`DuplicateNodeError`), since
+### Start a second `safety`
+
+It refuses to start (`DuplicateNodeError`), since
 two nodes publishing `estop` could contradict each other.
 
-**Watch the detector fall behind.**
+### Watch the detector fall behind
 
 ```bash
 uv run zenode health --watch
@@ -128,7 +136,7 @@ needs 50 ms per frame and gets one every 33 ms. Stop it, and `camera` logs
 `idle: nobody is subscribed` and stops grabbing. Any subscriber counts, so a
 `zenode echo camera/frame` in another terminal starts the camera too.
 
-**Ask for too much.**
+### Ask for too much
 
 ```bash
 uv run python -m examples.rover mission 9
@@ -141,7 +149,9 @@ drive refused: rover/drive/speed_limit: max_speed 9.0 m/s exceeds the chassis li
 The handler raised, the caller got the message, and `drive` counts one under
 `ERR`. Its config is unchanged.
 
-**Read the logs from the bus.** Warnings and above are published, so this
+### Read the logs from the bus
+
+Warnings and above are published, so this
 works from any machine on the network:
 
 ```bash
@@ -149,7 +159,9 @@ uv run zenode logs
 uv run zenode logs --node safety
 ```
 
-**Follow one pose through three nodes.** `odom` is a trace root, so one pose
+### Follow one pose through three nodes
+
+`odom` is a trace root, so one pose
 in five starts a trace. The log lines of every node that handled it carry the
 same `trace` id. Take one from a `safety` log line:
 
@@ -166,9 +178,12 @@ TRACE 869031049706dd5e36b72fa5c824a929
   drive    rover/estop                seq 2  ← safety   age 0.2ms  handler 0.1ms
 ```
 
-No collector is involved; the CLI asks each live node for its ring buffer.
+The CLI builds this by asking each live node for its ring buffer, so it needs
+no collector.
 
-**Export metrics.** `drive`'s `speed` and `camera`'s `frames_grabbed` ride on
+### Export metrics
+
+`drive`'s `speed` and `camera`'s `frames_grabbed` ride on
 their heartbeats, so a sidecar can serve them without importing either node:
 
 ```bash
@@ -176,12 +191,14 @@ uv run zenode export --prometheus :9100
 curl -s localhost:9100/metrics | grep zenode_app
 ```
 
-**Change a setting without a restart.** `drive` sets `describe_config`, so its
+### Change a setting without a restart
+
+`drive` sets `describe_config`, so its
 descriptor (`rover/node/drive/info`) carries its config and the schema of the
 `"write"` service. That is what `zenode-sovd` serves to a diagnostic client;
 see `docs/sovd.md`. The change is lost on restart.
 
-**Override config from the environment.**
+### Override config from the environment
 
 ```bash
 ZENODE_DRIVE__MAX_SPEED=1.0 uv run python -m examples.rover drive
