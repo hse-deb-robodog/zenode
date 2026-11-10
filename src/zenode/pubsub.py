@@ -371,18 +371,20 @@ class Subscription(Generic[T]):
         payload = sample.payload.to_bytes()
         attachment = sample.attachment
         attachment_bytes = attachment.to_bytes() if attachment is not None else None
+        # Copied out here like the payload: the sample must not cross threads.
+        key = str(sample.key_expr)
         with contextlib.suppress(RuntimeError):  # loop already closed (shutdown race)
-            self._loop.call_soon_threadsafe(self._push, payload, attachment_bytes)
+            self._loop.call_soon_threadsafe(self._push, payload, attachment_bytes, key)
 
     # -- loop side -------------------------------------------------------------
 
-    def _push(self, payload: bytes, attachment: bytes | None) -> None:
+    def _push(self, payload: bytes, attachment: bytes | None, key: str | None = None) -> None:
         if self._closed:
             return
         self.received += 1
         # Decoded once, here, on the loop side: the queue carries the envelope
         # so ``_consume`` never re-parses the attachment.
-        envelope = decode_envelope(attachment)
+        envelope = decode_envelope(attachment, key)
         age = envelope.age_s()
         if age is not None and self._is_stale(age):
             self._drop_stale_on_arrival(age)
@@ -670,7 +672,9 @@ class Subscription(Generic[T]):
             except Exception as e:
                 self.errors += 1
                 otel.record_error(e)
-                self._log.exception("handler raised", extra={"key": self.key})
+                # The concrete key, not the declared one: on a wildcard topic
+                # "handler raised on sensors/*/temp" does not say which sensor.
+                self._log.exception("handler raised", extra={"key": envelope.key or self.key})
             finally:
                 # Timed even when it raised: a handler that fails after 5s
                 # still cost 5s of the loop.
@@ -680,7 +684,10 @@ class Subscription(Generic[T]):
                     age = envelope.age_s()
                     self._ring.record(
                         node=self._node_name,
-                        key=self.key,
+                        # A hop is one message on one key; the span name above
+                        # stays the declared key so wildcard topics do not
+                        # explode tracing backends' span-name cardinality.
+                        key=envelope.key or self.key,
                         traceparent=envelope.traceparent,
                         envelope_node=envelope.node,
                         seq=envelope.seq,

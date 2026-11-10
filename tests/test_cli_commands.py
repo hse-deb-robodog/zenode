@@ -222,6 +222,57 @@ def test_topics_resolves_keys_against_the_namespace(cli_args, capsys):
 
 
 @pytest.mark.usefixtures("isolated_registry")
+def test_topics_filters_by_a_wildcard_pattern(cli_args, capsys):
+    class _Contract(TopicSet):
+        odom = Topic("state/odom", Ping)
+        imu = Topic("state/imu", Ping)
+        cmd = Topic("cmd/vel", Ping)
+
+    assert cmd_topics(cli_args(pattern="state/**")) == 0
+    out = capsys.readouterr().out
+    assert "state/odom" in out and "state/imu" in out
+    assert "cmd/vel" not in out
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_topics_pattern_finds_the_wildcard_topic_a_key_belongs_to(cli_args, capsys):
+    """Asking about one sensor should show the contract entry that decodes it."""
+
+    class _Contract(TopicSet):
+        temp = Topic("sensors/*/temp", Ping)
+
+    assert cmd_topics(cli_args(pattern="sensors/lidar/temp")) == 0
+    assert "sensors/*/temp" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_topics_pattern_resolves_against_the_namespace(cli_args, capsys):
+    class _Contract(TopicSet):
+        odom = Topic("state/odom", Ping)
+
+    assert cmd_topics(cli_args(namespace="robo", pattern="state/*")) == 0
+    assert "robo/state/odom" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_topics_pattern_that_matches_nothing_fails(cli_args, capsys):
+    class _Contract(TopicSet):
+        odom = Topic("state/odom", Ping)
+
+    assert cmd_topics(cli_args(pattern="cmd/**")) == 1
+    assert "match" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_topics_rejects_an_invalid_pattern(cli_args, capsys):
+    class _Contract(TopicSet):
+        odom = Topic("state/odom", Ping)
+
+    assert cmd_topics(cli_args(pattern="state/odom*")) == 2
+    assert "invalid key expression" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("isolated_registry")
 def test_topics_shows_delivery_flags(cli_args, capsys):
     """``latched``/``max_age`` change what a subscriber sees; surface them."""
 
@@ -441,6 +492,22 @@ def test_health_subscribes_to_the_namespaced_pattern(cli_args, mock_session):
 
 
 @pytest.mark.usefixtures("no_ambient_config")
+def test_health_node_pattern_narrows_both_subscriptions(cli_args, mock_session):
+    """zenoh filters, so heartbeats of other nodes never reach the CLI."""
+    cmd_health(cli_args(namespace="robodog", node="arm_$*", watch=False, wait=0.0))
+    assert mock_session.declare_subscriber.call_args.args[0] == "robodog/node/arm_$*/health"
+    assert mock_session.declare_latched_subscriber.call_args.args[0] == "robodog/node/arm_$*/info"
+
+
+@pytest.mark.usefixtures("no_ambient_config")
+@pytest.mark.parametrize("bad", ["arm/left", "arm*", "**/x"])
+def test_health_rejects_a_pattern_that_is_not_one_segment(cli_args, mock_session, bad, capsys):
+    assert cmd_health(cli_args(node=bad, watch=False, wait=0.0)) == 2
+    assert "invalid node pattern" in capsys.readouterr().err
+    mock_session.declare_subscriber.assert_not_called()
+
+
+@pytest.mark.usefixtures("no_ambient_config")
 def test_health_asks_the_latched_cache_for_the_descriptors(cli_args, mock_session):
     """Published once per node, so a plain subscriber would learn no units."""
     cmd_health(cli_args(namespace="robodog", watch=False, wait=0.0))
@@ -569,6 +636,86 @@ def test_echo_resolves_the_key_against_the_namespace(echo_args, mock_session, sc
     assert mock_session.declare_subscriber.call_args.args[0] == "robodog/state/odom"
 
 
+class Temp(BaseModel):
+    celsius: float = 0.0
+
+
+@pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
+def test_echo_on_a_wildcard_decodes_each_sample_by_its_own_topic(
+    echo_args, mock_session, scripted_queue, capsys
+):
+    """`echo state/**` spans several schemas; one up-front lookup cannot serve them all."""
+
+    class _Contract(TopicSet):
+        ping = Topic("state/ping", Ping)
+        temp = Topic("state/temp", Temp)
+
+    scripted_queue(
+        [
+            echo_sample(b'{"value": 1}', key="state/ping"),
+            echo_sample(b'{"celsius": 21.5}', key="state/temp"),
+            echo_sample(b'{"x": 1}', key="state/unknown"),
+        ]
+    )
+
+    assert cmd_echo(echo_args("state/**")) == 0
+    out = capsys.readouterr().out
+    assert "typed per key" in out
+    assert '{"value":1}' in out
+    assert '{"celsius":21.5}' in out
+    assert '{"x":1}' in out  # unknown key: raw, not a crash
+
+
+@pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
+def test_echo_on_a_wildcard_labels_every_sample_with_its_key(
+    echo_args, mock_session, scripted_queue, capsys
+):
+    scripted_queue([echo_sample(b"{}", key="a/one"), echo_sample(b"{}", key="a/two")])
+
+    cmd_echo(echo_args("a/*"))
+    out = capsys.readouterr().out
+    assert "-- key=a/one" in out
+    assert "-- key=a/two" in out
+
+
+@pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
+def test_echo_on_an_exact_key_does_not_add_key_lines(
+    echo_args, mock_session, scripted_queue, capsys
+):
+    scripted_queue([echo_sample(b"{}", key="some/key")])
+    cmd_echo(echo_args("some/key"))
+    assert "-- key=" not in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
+def test_echo_decodes_a_concrete_key_through_a_wildcard_topic(
+    echo_args, mock_session, scripted_queue, capsys
+):
+    class _Contract(TopicSet):
+        temp = Topic("sensors/*/temp", Temp)
+
+    scripted_queue([echo_sample(b'{"celsius": 3}', key="sensors/lidar/temp")])
+
+    cmd_echo(echo_args("sensors/lidar/temp"))
+    out = capsys.readouterr().out
+    assert "typed: Temp" in out
+    assert '{"celsius":3.0}' in out
+
+
+@pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
+def test_echo_on_a_wildcard_asks_for_history_when_a_matching_topic_is_latched(
+    echo_args, mock_session, scripted_queue
+):
+    class _Contract(TopicSet):
+        mode = Topic("state/mode", Ping, latched=True)
+        ping = Topic("state/ping", Ping)
+
+    scripted_queue([])
+    cmd_echo(echo_args("state/**"))
+    assert mock_session.declare_latched_subscriber.call_args.args[0] == "state/**"
+    mock_session.declare_subscriber.assert_not_called()
+
+
 @pytest.mark.usefixtures("no_ambient_config", "isolated_registry")
 def test_echo_undeclares_and_closes(echo_args, mock_session, scripted_queue):
     scripted_queue([])
@@ -600,6 +747,27 @@ def test_hz_forgets_samples_older_than_the_window(cli_args, mock_session, script
 
     cmd_hz(cli_args(key="test/ping", window=5.0, absolute=False))
     assert "waiting for more samples" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("no_ambient_config")
+def test_hz_on_a_wildcard_reports_one_rate_per_key(cli_args, mock_session, scripted_clock, capsys):
+    """A 2 Hz key and a 1 Hz key are two rates, not one blended 3-sample figure."""
+    scripted_clock([0.0, 0.0, 0.5, 1.0, 1.0, 1.0])
+    subscriber = MagicMock(name="subscriber")
+
+    def declare(_key, callback):
+        for key in ("s/fast", "s/slow", "s/fast", "s/fast", "s/slow"):
+            callback(SimpleNamespace(key_expr=key))
+        return subscriber
+
+    mock_session.declare_subscriber.side_effect = declare
+
+    assert cmd_hz(cli_args(key="s/*", window=5.0, absolute=False)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    fast = next(line for line in lines if line.startswith("s/fast"))
+    slow = next(line for line in lines if line.startswith("s/slow"))
+    assert "2.00 Hz" in fast and "(3 samples in window)" in fast
+    assert "1.00 Hz" in slow and "(2 samples in window)" in slow
 
 
 @pytest.mark.usefixtures("no_ambient_config")

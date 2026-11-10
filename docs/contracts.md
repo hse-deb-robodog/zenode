@@ -57,6 +57,24 @@ keys owned by an external system, opt out:
 LIDAR = Topic.absolute("livox/lidar", PointCloud)
 ```
 
+### Wildcard keys
+
+A key may use zenoh's wildcards — `*` for one segment, `**` for any number,
+`$*` inside a segment — to subscribe to a family of keys at once:
+
+```python
+TEMPS = Topic("sensors/*/temp", Temperature)
+```
+
+The handler learns which key matched from `Envelope.key`, e.g.
+`robodog/sensors/lidar/temp`. A wildcard topic can only be subscribed:
+`publish()` refuses one at class definition and `Node.publisher()` when called,
+both with `ContractError`, because a put on a wildcard would land on every
+matching key at once.
+
+`examples/sensors.py` runs a node publishing several sensors under one
+wildcard topic and a monitor subscribed to all of them.
+
 ### Delivery semantics
 
 **`latched`** keeps the last value available to subscribers that join later.

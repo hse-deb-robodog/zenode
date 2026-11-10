@@ -70,6 +70,27 @@ def _validate_key(key: str, *, what: str) -> None:
         raise ContractError(f"{what}: key {key!r} contains whitespace")
 
 
+def is_wildcard(key: str) -> bool:
+    """Whether ``key`` is a zenoh key *expression* rather than one concrete key.
+
+    zenoh only allows ``*`` as part of a wildcard (``*``, ``**``, ``$*``) —
+    a literal asterisk is not a valid key character — so the check needs no
+    parser, which keeps this module free of zenoh. A wildcard topic is fine
+    to subscribe and never fine to publish: a put on ``sensors/*/temp`` would
+    land on every sensor's key at once.
+    """
+    return "*" in key
+
+
+def reject_wildcard_publish(key: str, *, what: str) -> None:
+    """Raise :class:`ContractError` if ``key`` cannot name one publication."""
+    if is_wildcard(key):
+        raise ContractError(
+            f"{what}: cannot publish on wildcard key {key!r} — a publisher needs one "
+            "concrete key; wildcards are for subscribing"
+        )
+
+
 NAME_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 """What a node name and each namespace segment may be. Stricter than
 :func:`_validate_key` on purpose: a name becomes a segment of every reserved

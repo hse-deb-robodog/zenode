@@ -321,7 +321,7 @@ rate(zenode_exporter_metric_pushes_total{outcome="failed"}[5m]) > 0
 | Command                                             | Purpose                                       |
 |-----------------------------------------------------|-----------------------------------------------|
 | `zenode logs [--node] [--level] [--trace] [--grep]` | Follow log records from every node.           |
-| `zenode health [--watch]`                           | Table of every node's heartbeat.              |
+| `zenode health [NODE] [--watch]`                    | Table of every node's heartbeat.              |
 | `zenode trace <trace-id>`                           | Reconstruct one trace from every node's ring. |
 | `zenode export`                                     | Forward health and logs to external systems.  |
 | `zenode nodes`, `topics`, `echo`, `hz`, `doctor`    | General inspection.                           |

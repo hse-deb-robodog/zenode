@@ -63,7 +63,14 @@ from .reporting import Reporter, ReporterSources
 from .service import ServiceHandler, ServiceServer, call_service
 from .shm import DEFAULT_POOL_BYTES, ShmPool
 from .timers import OnTimerError, Timer, resolve_interval
-from .topic import Service, Topic, resolve_key, validate_namespace, validate_node_name
+from .topic import (
+    Service,
+    Topic,
+    reject_wildcard_publish,
+    resolve_key,
+    validate_namespace,
+    validate_node_name,
+)
 from .trace import TraceRing
 
 T = TypeVar("T")
@@ -748,6 +755,9 @@ class Node:
         return resolve_key(relative, self.namespace, absolute=absolute)
 
     def publisher(self, topic: Topic[T]) -> Publisher[T]:
+        # zenoh would accept the declaration and fan each put out to every
+        # matching key — never what a publisher of "the" value meant.
+        reject_wildcard_publish(topic.key, what=f"publisher {topic.key!r}")
         key = topic.resolve(self.namespace)
         # QoS is fixed at declaration, not per-put, and both publisher flavours
         # take the same three parameters — so the branches must not drift.

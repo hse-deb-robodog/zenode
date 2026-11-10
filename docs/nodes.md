@@ -143,7 +143,9 @@ Sync and async handlers are both accepted. All handlers run on the node's event
 loop, never on a zenoh thread.
 
 `Envelope` carries the delivery metadata: `node` (the sender), `seq`, `ts_ns`,
-`traceparent`, and `age_s()`.
+`traceparent`, and `age_s()`. It also carries `key`, the concrete key the
+sample arrived on with the namespace included, which is how a handler on a
+[wildcard topic](contracts.md#wildcard-keys) tells its sources apart.
 
 A handler that raises is logged and counted as `handler_errors`, and the
 subscription continues, so one bad message cannot take a node down.

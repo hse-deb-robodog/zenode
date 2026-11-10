@@ -39,12 +39,14 @@ def info_key(name: str) -> str:
     return f"node/{name}/info"
 
 
-def info_pattern(namespace: str) -> str:
+def info_pattern(namespace: str, node: str = "*") -> str:
     """Key expression matching every node's descriptor in ``namespace``.
 
     Derived from :func:`info_key` so the publisher and the CLI cannot drift.
+    ``node`` narrows it to matching names; it is one key segment, so ``*``
+    or a chunk wildcard like ``arm_$*``, never a ``/``.
     """
-    return resolve_key(info_key("*"), namespace)
+    return resolve_key(info_key(node), namespace)
 
 
 class EntityInfo(BaseModel):

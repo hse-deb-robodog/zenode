@@ -22,12 +22,14 @@ def health_key(name: str) -> str:
     return f"node/{name}/health"
 
 
-def health_pattern(namespace: str) -> str:
+def health_pattern(namespace: str, node: str = "*") -> str:
     """Key expression matching every node's health in ``namespace``.
 
     Derived from :func:`health_key` so the publisher and the CLI cannot drift.
+    ``node`` narrows it to matching names; it is one key segment, so ``*``
+    or a chunk wildcard like ``arm_$*``, never a ``/``.
     """
-    return resolve_key(health_key("*"), namespace)
+    return resolve_key(health_key(node), namespace)
 
 
 class NodeHealth(BaseModel):

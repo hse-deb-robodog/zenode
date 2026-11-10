@@ -133,6 +133,7 @@ repository contains complete programs, each runnable as-is:
 | `contract.py`, `talker.py`, `listener.py` | Typed pub/sub and a service call between two processes; the recommended starting point for a new contract |
 | `otel_pipeline.py` | A traced three-node pipeline exporting spans to an OpenTelemetry backend |
 | `shm_camera.py` | Shared-memory publishing, with `--plain` to compare against the normal path |
+| `sensors.py` | Wildcard keys: one subscription to `sensors/*/temp` telling sensors apart by `Envelope.key`, and `echo`/`hz` on the same wildcard |
 | `tunable.py` | A node that publishes its settings on its descriptor (`describe_config`) and accepts one runtime change through a `diagnostic="write"` service |
 
 ## What the runtime guarantees

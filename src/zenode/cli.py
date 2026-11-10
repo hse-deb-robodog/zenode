@@ -38,7 +38,7 @@ from .config import TransportConfig, find_config_file, load_transport_config
 from .envelope import decode_envelope
 from .errors import ConfigError
 from .exporter import DEFAULT_STALE_AFTER, Registry, format_value, make_server
-from .msgs.health import NodeHealth, health_pattern
+from .msgs.health import NodeHealth, health_key, health_pattern
 from .msgs.info import NodeInfo, info_pattern
 from .msgs.log import LogRecordMsg, log_key, log_pattern
 from .msgs.trace import Hop, TraceHops, TraceQuery, trace_pattern
@@ -48,6 +48,7 @@ from .presence import list_nodes, node_name_from_key, presence_pattern
 from .topic import (
     Topic,
     find_topic,
+    is_wildcard,
     registered_services,
     registered_topics,
     resolve_key,
@@ -110,6 +111,51 @@ def _resolve_cli_key(key: str, namespace: str, absolute: bool) -> str:
     return resolve_key(key, namespace)
 
 
+def _key_expr(key: str) -> zenoh.KeyExpr | None:
+    """``key`` as a zenoh key expression, or ``None`` if zenoh rejects it."""
+    try:
+        return zenoh.KeyExpr(key)
+    except zenoh.ZError:
+        return None
+
+
+def _find_cli_topic(key: str, namespace: str) -> Topic[Any] | None:
+    """The registered topic a concrete received ``key`` belongs to.
+
+    Exact matches first, against the namespace and then without it (a CLI may
+    be pointed at a contract from another deployment). Then wildcard topics of
+    the contract — ``sensors/*/temp`` owns ``sensors/lidar/temp`` — which the
+    zenoh-free :func:`~zenode.topic.find_topic` cannot answer.
+    """
+    topic = find_topic(key, namespace) or find_topic(key)
+    if topic is not None:
+        return topic
+    concrete = _key_expr(key)
+    if concrete is None:
+        return None
+    for _, candidate in registered_topics():
+        if not is_wildcard(candidate.key):
+            continue
+        for resolved in {candidate.resolve(namespace), candidate.key}:
+            declared = _key_expr(resolved)
+            if declared is not None and declared.includes(concrete):
+                return candidate
+    return None
+
+
+def _topics_matching(pattern: str, namespace: str) -> list[Topic[Any]]:
+    """Registered topics a subscription on ``pattern`` could receive."""
+    expr = _key_expr(pattern)
+    if expr is None:
+        return []
+    found: list[Topic[Any]] = []
+    for _, topic in registered_topics():
+        declared = _key_expr(topic.resolve(namespace))
+        if declared is not None and expr.intersects(declared):
+            found.append(topic)
+    return found
+
+
 def _format_typed(topic: Topic[Any], payload: bytes, pretty: bool) -> str:
     value = topic.codec.decode(payload)
     dump = getattr(value, "model_dump_json", None)
@@ -140,6 +186,25 @@ def cmd_topics(args: argparse.Namespace) -> int:
     if not topics and not services:
         print("no registered topics — pass --contract <module> that defines TopicSets")
         return 1
+    pattern = getattr(args, "pattern", None)
+    if pattern:
+        resolved = _resolve_cli_key(pattern, namespace, False)
+        expr = _key_expr(resolved)
+        if expr is None:
+            print(f"invalid key expression {pattern!r}", file=sys.stderr)
+            return 2
+
+        # Intersects, not includes: `topics sensors/lidar/temp` should still
+        # list the contract's `sensors/*/temp`, which is what it would decode as.
+        def wanted(key: str) -> bool:
+            declared = _key_expr(key)
+            return declared is not None and expr.intersects(declared)
+
+        topics = [(e, t) for e, t in topics if wanted(t.resolve(namespace))]
+        services = [(e, sv) for e, sv in services if wanted(sv.resolve(namespace))]
+        if not topics and not services:
+            print(f"no registered topics or services match {resolved!r}")
+            return 1
     if topics:
         print(f"{'KEY':<44} {'SCHEMA':<24} {'FLAGS':<42} OWNER")
         for entry, topic in topics:
@@ -167,15 +232,30 @@ def cmd_topics(args: argparse.Namespace) -> int:
 def cmd_echo(args: argparse.Namespace) -> int:
     _load_contracts(args.contract)
     transport = _transport_from_args(args)
-    key = _resolve_cli_key(args.key, transport.namespace, args.absolute)
-    topic = None if args.raw else find_topic(key, transport.namespace) or find_topic(key)
+    namespace = transport.namespace
+    key = _resolve_cli_key(args.key, namespace, args.absolute)
+    wildcard = is_wildcard(key)
+    # A wildcard spans several topics, so decoding is decided per sample; one
+    # exact key is decided once, up front.
+    topic = None if args.raw or wildcard else _find_cli_topic(key, namespace)
+    candidates = [] if args.raw or not wildcard else _topics_matching(key, namespace)
+    latched = [t for t in ([topic] if topic is not None else candidates) if t.latched]
     samples: queue.Queue[zenoh.Sample] = queue.Queue()
     session = _open_session(transport)
-    if topic is not None and topic.latched:
-        sub: Any = _declare_latched_subscriber(session, key, samples.put, max_samples=topic.history)
+    if latched:
+        history = max(t.history for t in latched)
+        sub: Any = _declare_latched_subscriber(session, key, samples.put, max_samples=history)
     else:
         sub = session.declare_subscriber(key, samples.put)
-    print(f"listening on {key!r}" + (f" (typed: {topic.schema.__name__})" if topic else " (raw)"))
+    if topic is not None:
+        mode = f" (typed: {topic.schema.__name__})"
+    elif candidates:
+        mode = f" (typed per key: {len(candidates)} contract topic(s) match)"
+    else:
+        mode = " (raw)"
+    print(f"listening on {key!r}{mode}")
+    # Bounded by the keys actually on the bus, and a CLI run is short-lived.
+    resolved: dict[str, Topic[Any] | None] = {}
     try:
         while True:
             try:
@@ -183,17 +263,26 @@ def cmd_echo(args: argparse.Namespace) -> int:
             except queue.Empty:
                 continue
             payload = sample.payload.to_bytes()
+            sample_key = str(sample.key_expr)
             if args.meta:
                 attachment = sample.attachment
                 env = decode_envelope(attachment.to_bytes() if attachment else None)
                 age = env.age_s()
                 print(
                     f"-- from={env.node or '?'} seq={env.seq if env.seq is not None else '?'} "
-                    f"age={f'{age * 1000:.1f}ms' if age is not None else '?'} key={sample.key_expr}"
+                    f"age={f'{age * 1000:.1f}ms' if age is not None else '?'} key={sample_key}"
                 )
-            if topic is not None:
+            elif wildcard:
+                # Without the key, two sensors' readings are indistinguishable.
+                print(f"-- key={sample_key}")
+            decoder = topic
+            if wildcard and not args.raw:
+                if sample_key not in resolved:
+                    resolved[sample_key] = _find_cli_topic(sample_key, namespace)
+                decoder = resolved[sample_key]
+            if decoder is not None:
                 try:
-                    print(_format_typed(topic, payload, args.pretty))
+                    print(_format_typed(decoder, payload, args.pretty))
                     continue
                 except Exception as e:
                     print(f"!! decode failed ({e}); raw:")
@@ -208,9 +297,23 @@ def cmd_echo(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------------- hz
 
 
+def _rate_line(stamps: deque[float], now: float, window: float) -> str:
+    """Trim ``stamps`` to the window and describe the rate it shows."""
+    while stamps and stamps[0] < now - window:
+        stamps.popleft()
+    n = len(stamps)
+    if n < 2:
+        return "rate: no samples" if n == 0 else "rate: waiting for more samples"
+    span = stamps[-1] - stamps[0]
+    rate = (n - 1) / span if span > 0 else 0.0
+    return f"rate: {rate:6.2f} Hz  ({n} samples in window)"
+
+
 def cmd_hz(args: argparse.Namespace) -> int:
     transport = _transport_from_args(args)
     key = _resolve_cli_key(args.key, transport.namespace, args.absolute)
+    if is_wildcard(key):
+        return _hz_per_key(transport, key, args.window)
     stamps: deque[float] = deque(maxlen=100_000)
 
     session = _open_session(transport)
@@ -219,16 +322,50 @@ def cmd_hz(args: argparse.Namespace) -> int:
     try:
         while True:
             time.sleep(1.0)
+            print(_rate_line(stamps, time.monotonic(), args.window))
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        sub.undeclare()
+        session.close()
+
+
+def _hz_per_key(transport: TransportConfig, key: str, window: float) -> int:
+    """``hz`` on a wildcard: one rate per concrete key.
+
+    One aggregate rate over ``state/**`` would add a 100 Hz IMU to a 1 Hz
+    battery and report a number that describes neither.
+    """
+    # Smaller per key than the single-key cap: there may be many keys.
+    stamps: dict[str, deque[float]] = {}
+    lock = threading.Lock()  # the callback inserts keys on a zenoh thread
+
+    def on_sample(sample: zenoh.Sample) -> None:
+        now = time.monotonic()
+        sample_key = str(sample.key_expr)
+        with lock:
+            bucket = stamps.get(sample_key)
+            if bucket is None:
+                bucket = stamps[sample_key] = deque(maxlen=10_000)
+            bucket.append(now)
+
+    session = _open_session(transport)
+    sub = session.declare_subscriber(key, on_sample)
+    print(f"measuring per-key rates on {key!r} (window {window}s, Ctrl-C to stop)")
+    try:
+        while True:
+            time.sleep(1.0)
             now = time.monotonic()
-            while stamps and stamps[0] < now - args.window:
-                stamps.popleft()
-            n = len(stamps)
-            if n < 2:
-                print("rate: no samples" if n == 0 else "rate: waiting for more samples")
-                continue
-            span = stamps[-1] - stamps[0]
-            rate = (n - 1) / span if span > 0 else 0.0
-            print(f"rate: {rate:6.2f} Hz  ({n} samples in window)")
+            with lock:
+                if not stamps:
+                    print("rate: no samples")
+                    continue
+                width = max(len(k) for k in stamps)
+                lines = [
+                    f"{k:<{width}}  {_rate_line(stamps[k], now, window)}" for k in sorted(stamps)
+                ]
+            print("\n".join(lines))
+            print()
     except KeyboardInterrupt:
         return 0
     finally:
@@ -360,7 +497,16 @@ def _render_health(
 
 def cmd_health(args: argparse.Namespace) -> int:
     transport = _transport_from_args(args)
-    pattern = health_pattern(transport.namespace)
+    node = getattr(args, "node", None) or "*"
+    # Filtering is zenoh's job: the pattern becomes the name segment of the
+    # subscription, so non-matching heartbeats never reach this process.
+    if "/" in node or _key_expr(health_key(node)) is None:
+        print(
+            f"invalid node pattern {node!r} — one key segment, e.g. 'arm', '*' or 'arm_$*'",
+            file=sys.stderr,
+        )
+        return 2
+    pattern = health_pattern(transport.namespace, node)
     inbox: queue.Queue[bytes] = queue.Queue()
     info_inbox: queue.Queue[bytes] = queue.Queue()
     session = _open_session(transport)
@@ -368,7 +514,9 @@ def cmd_health(args: argparse.Namespace) -> int:
     # Latched and published once per node, so this has to ask for the history
     # or a CLI started after the nodes learns no units at all.
     info_sub = _declare_latched_subscriber(
-        session, info_pattern(transport.namespace), lambda s: info_inbox.put(s.payload.to_bytes())
+        session,
+        info_pattern(transport.namespace, node),
+        lambda s: info_inbox.put(s.payload.to_bytes()),
     )
     latest: dict[str, tuple[NodeHealth, float]] = {}
     catalogs: dict[str, NodeInfo] = {}
@@ -792,6 +940,9 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("topics", help="list the registered contract")
+    p.add_argument(
+        "pattern", nargs="?", help="only keys intersecting this key expression (e.g. 'state/**')"
+    )
     _add_common(p)
     p.set_defaults(fn=cmd_topics)
 
@@ -812,6 +963,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(fn=cmd_hz)
 
     p = sub.add_parser("health", help="show the health heartbeat of every live node")
+    p.add_argument("node", nargs="?", help="only nodes matching this name pattern (e.g. 'arm_$*')")
     p.add_argument("--watch", action="store_true", help="keep refreshing the table")
     p.add_argument(
         "--wait", type=float, default=3.0, help="seconds to collect before printing (default 3)"
