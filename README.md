@@ -181,4 +181,4 @@ Full detail is in [docs/shared-memory.md](docs/shared-memory.md).
 
 ## Status
 
-Early (0.1.x): APIs may still move. Python ≥ 3.11, `eclipse-zenoh` ≥ 1.7.
+Early (0.2.x): APIs may still move. Python ≥ 3.11, `eclipse-zenoh` ≥ 1.7.
