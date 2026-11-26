@@ -43,11 +43,19 @@ however you like and find each other over the network.
 pip install zenode
 ```
 
-Requires Python 3.11 or newer. The only runtime dependencies are
-`eclipse-zenoh` and `pydantic`. Optional extras:
+With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-pip install 'zenode[otel]'      # OpenTelemetry spans
+uv add zenode
+```
+
+Requires Python 3.11 or newer. The only runtime dependencies are
+`eclipse-zenoh` and `pydantic`. The available optional extra is `otel`, which
+provides the OpenTelemetry API for tracing:
+
+```bash
+pip install 'zenode[otel]'
+uv add 'zenode[otel]'
 ```
 
 ## A first node
